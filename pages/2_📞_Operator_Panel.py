@@ -288,11 +288,6 @@ with tab2:
                     else:
                         st.write("**Son Görüşme Notları:** _Not girilmemiş_")
 
-                    # Action button
-                    if st.button(f"📞 Tekrar Ara", key=f"call_{contact['id']}", width="stretch"):
-                        st.info(f"📞 {contact['phone_number']} numarasını arayın")
-                        st.balloons()
-
         else:
             st.warning(f"'{search}' araması için sonuç bulunamadı.")
     else:
