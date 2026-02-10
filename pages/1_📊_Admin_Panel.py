@@ -178,6 +178,12 @@ with tab2:
                     col2.metric("✅ Başarılı", summary['successful'])
                     col3.metric("❌ Başarısız", summary['failed'])
 
+                    # Show import details
+                    if summary['successful'] > 0:
+                        st.success(f"🎉 {summary['successful']} müşteri başarıyla havuza eklendi!")
+                    else:
+                        st.warning("⚠️ Hiçbir müşteri havuza eklenmedi. Tüm müşteriler filtrelendi.")
+
                     # Show skipped statistics
                     st.divider()
                     st.subheader("📊 Filtreleme İstatistikleri")
@@ -208,13 +214,30 @@ with tab2:
 with tab3:
     st.subheader("📋 Müşteri Listesi")
 
+    # Show total counts in database
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM customers")
+    total_in_db = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM customers WHERE status = 'pending'")
+    pending_in_db = cursor.fetchone()[0]
+    conn.close()
+
+    col_info1, col_info2, col_info3 = st.columns(3)
+    col_info1.metric("📊 Toplam Müşteri (DB)", total_in_db)
+    col_info2.metric("⏳ Havuzda Bekleyen", pending_in_db)
+    col_info3.metric("🔍 Gösterilen (max)", "500")
+
+    st.divider()
+
     # Filters
     col1, col2, col3 = st.columns(3)
 
     with col1:
         status_filter = st.selectbox(
             "Durum Filtresi:",
-            ["Tümü", "⏳ Beklemede", "🔄 Atandı", "✅ Tamamlandı", "❌ Ulaşılamadı"]
+            ["Tümü", "⏳ Beklemede", "🔄 Atandı", "✅ Tamamlandı", "❌ Ulaşılamadı"],
+            index=0  # Default: Tümü
         )
 
     with col2:
@@ -293,7 +316,7 @@ with tab3:
 
     # Display results
     if customers:
-        st.write(f"**Toplam:** {len(customers)} müşteri")
+        st.write(f"**Toplam:** {len(customers)} müşteri (max 500 gösteriliyor)")
 
         # Convert to DataFrame for better display
         df_data = []
