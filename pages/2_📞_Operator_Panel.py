@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+from datetime import datetime
 from services.pool_service import pull_customer_for_operator, return_customer_to_pool
 from services.database import get_connection
 from utils.constants import CALL_STATUS_LABELS
@@ -90,9 +91,31 @@ with tab1:
         with col1:
             st.write(f"**Ad:** {customer['name']}")
             st.write(f"**Soyad:** {customer['surname']}")
+            # Show site with emoji
+            site_emoji = "🎰" if customer.get('site') == 'truva' else "♠️"
+            site_name = customer.get('site', 'bilinmiyor').title()
+            st.write(f"**Site:** {site_emoji} {site_name}")
         with col2:
             st.write(f"**Kullanıcı Kodu:** {customer['user_code']}")
             st.write(f"**Telefon Numarası:** `{customer['phone_number']}`")
+
+        # Show how long customer has been inactive
+        if customer.get('last_deposit_date'):
+            try:
+                last_deposit = pd.to_datetime(customer['last_deposit_date'])
+                days_inactive = (datetime.now() - last_deposit).days
+
+                # Color code based on inactivity
+                if days_inactive > 90:
+                    emoji = "🔴"
+                elif days_inactive > 60:
+                    emoji = "🟠"
+                else:
+                    emoji = "🟡"
+
+                st.info(f"{emoji} **Pasif Süresi:** {days_inactive} gün (Son yatırım: {customer['last_deposit_date'][:10]})")
+            except:
+                pass
 
         if customer['call_attempts'] > 0:
             st.write(f"**Arama Denemesi:** {customer['call_attempts']}/3")
@@ -166,6 +189,7 @@ with tab2:
             c.surname,
             c.user_code,
             c.phone_number,
+            c.site,
             cl.notes,
             cl.created_at as last_call_date,
             COUNT(DISTINCT cl2.id) as total_calls
@@ -211,12 +235,17 @@ with tab2:
 
             # Display each contact
             for contact in filtered_contacts:
-                with st.expander(f"👤 {contact['name']} {contact['surname']} - {contact['phone_number']}", expanded=False):
+                # Show site with emoji in title
+                site_emoji = "🎰" if contact.get('site') == 'truva' else "♠️"
+                site_name = contact.get('site', 'bilinmiyor').title()
+
+                with st.expander(f"👤 {contact['name']} {contact['surname']} - {site_emoji} {site_name} - {contact['phone_number']}", expanded=False):
                     col1, col2 = st.columns(2)
 
                     with col1:
                         st.write(f"**Ad Soyad:** {contact['name']} {contact['surname']}")
                         st.write(f"**Kullanıcı Kodu:** {contact['user_code']}")
+                        st.write(f"**Site:** {site_emoji} {site_name}")
 
                     with col2:
                         st.write(f"**Telefon:** `{contact['phone_number']}`")

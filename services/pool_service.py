@@ -64,7 +64,11 @@ def pull_customer_for_operator(operator_id):
                 """, (operator_id, datetime.now(), datetime.now(), customer['id']))
 
                 conn.commit()
-                return dict(customer)
+
+                # Fetch updated customer data
+                cursor.execute("SELECT * FROM customers WHERE id = ?", (customer['id'],))
+                updated_customer = cursor.fetchone()
+                return dict(updated_customer) if updated_customer else dict(customer)
 
             return None
 

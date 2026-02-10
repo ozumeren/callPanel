@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-from services.excel_service import process_excel_file
 from services.csv_service import process_csv_file
 from services.auth_service import create_operator
 from services.database import get_connection
@@ -30,7 +29,7 @@ if st.sidebar.button("🚪 Çıkış Yap"):
 st.title("📊 Admin Paneli")
 
 # Tabs
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["📈 Dashboard", "📤 Dosya Yükle", "📋 Müşteri Listesi", "🎉 Geri Dönenler", "👥 Operatör Yönetimi"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["📈 Dashboard", "📤 CSV Yükle", "📋 Müşteri Listesi", "🎉 Geri Dönenler", "👥 Operatör Yönetimi"])
 
 # Tab 1: Dashboard
 with tab1:
@@ -88,6 +87,7 @@ with tab1:
         SELECT
             u.full_name,
             COUNT(cl.id) as total_calls,
+            COUNT(DISTINCT cl.customer_id) as unique_customers,
             SUM(CASE WHEN cl.call_status = 'reached' THEN 1 ELSE 0 END) as reached,
             c.name || ' ' || c.surname as current_customer
         FROM users u
@@ -102,128 +102,107 @@ with tab1:
     conn.close()
 
     if operators:
-        df = pd.DataFrame(operators, columns=['Operatör', 'Toplam Arama', 'Ulaşılan', 'Şu Anki Müşteri'])
-        df['Şu Anki Müşteri'] = df['Şu Anki Müşteri'].fillna('-')
+        # Prepare data with success rate
+        df_data = []
+        for op in operators:
+            total_calls = op[1]
+            unique_customers = op[2]
+            reached = op[3]
+            current_customer = op[4] if op[4] else '-'
+
+            # Calculate success rate
+            success_rate = f"%{int(reached/total_calls*100)}" if total_calls > 0 else "-"
+
+            df_data.append({
+                'Operatör': op[0],
+                'Müşteri Sayısı': unique_customers,
+                'Toplam Arama': total_calls,
+                'Ulaşılan': reached,
+                'Başarı Oranı': success_rate,
+                'Şu Anki Müşteri': current_customer
+            })
+
+        df = pd.DataFrame(df_data)
         st.dataframe(df, use_container_width=True, hide_index=True)
     else:
         st.info("Henüz operatör yok")
 
-# Tab 2: File Upload (Excel & CSV)
+# Tab 2: CSV Upload
 with tab2:
-    st.subheader("📤 Dosya Yükle")
+    st.subheader("📤 CSV Dosyası Yükle")
 
-    # File type selector
-    upload_type = st.radio(
-        "Dosya Türü Seçin:",
-        ["📊 Excel (.xlsx, .xls)", "📄 CSV (Pipe-delimited)"],
-        horizontal=True
+    st.info("""
+    **CSV Formatı (Pipe-delimited: |)**
+
+    **Gerekli Kolonlar:**
+    - FIRST_NAME
+    - SURNAME
+    - CUSTOMER_CODE (benzersiz)
+    - PHONE
+    - HAS_DEPOSIT
+    - TOTAL_DEPOSIT_AMOUNT
+    - LAST_DEPOSIT_TRANSACTION_DATE
+
+    **Otomatik Filtreleme:**
+    - ✅ Sadece yatırım yapmış müşteriler (TOTAL_DEPOSIT_AMOUNT > 0)
+    - ✅ Sadece pasif müşteriler (30+ gün yatırım yok)
+    - ❌ Sıfır yatırımlılar atlanır
+    - ❌ Aktif müşteriler atlanır
+    - ❌ Duplicate kayıtlar atlanır
+    """)
+
+    # Site selection
+    site_selection = st.selectbox(
+        "🌐 Site Seçin:",
+        ["Truva", "Venus"],
+        help="Bu CSV dosyasındaki müşteriler hangi siteye ait?"
+    )
+    selected_site = site_selection.lower()  # truva or venus
+
+    uploaded_file = st.file_uploader(
+        "CSV dosyası seçin (.csv)",
+        type=['csv']
     )
 
-    if upload_type == "📊 Excel (.xlsx, .xls)":
-        st.info("""
-        **Excel Formatı:**
-        - **Ad** (zorunlu)
-        - **Soyad** (zorunlu)
-        - **Kullanıcı Kodu** (zorunlu, benzersiz)
-        - **Telefon Numarası** (zorunlu)
-        """)
+    if uploaded_file:
+        if st.button("📥 CSV Yükle ve İşle", type="primary"):
+            with st.spinner("CSV dosyası işleniyor..."):
+                try:
+                    upload_id, summary = process_csv_file(uploaded_file, user['id'], selected_site)
 
-        uploaded_file = st.file_uploader(
-            "Excel dosyası seçin (.xlsx, .xls)",
-            type=['xlsx', 'xls'],
-            key='excel_uploader'
-        )
+                    st.success("✅ CSV dosyası başarıyla işlendi!")
 
-        if uploaded_file:
-            if st.button("📥 Excel Yükle ve İşle", type="primary", key='excel_upload_btn'):
-                with st.spinner("Excel dosyası işleniyor..."):
-                    try:
-                        upload_id, summary = process_excel_file(uploaded_file, user['id'])
+                    # Show detailed metrics
+                    col1, col2, col3 = st.columns(3)
+                    col1.metric("Toplam Satır", summary['total_rows'])
+                    col2.metric("✅ Başarılı", summary['successful'])
+                    col3.metric("❌ Başarısız", summary['failed'])
 
-                        st.success("✅ Excel dosyası başarıyla işlendi!")
+                    # Show skipped statistics
+                    st.divider()
+                    st.subheader("📊 Filtreleme İstatistikleri")
 
-                        col1, col2, col3 = st.columns(3)
-                        col1.metric("Toplam Satır", summary['total_rows'])
-                        col2.metric("Başarılı", summary['successful'])
-                        col3.metric("Başarısız", summary['failed'])
+                    col1, col2, col3 = st.columns(3)
+                    col1.metric("🚫 Sıfır Yatırım", summary['skipped_no_deposit'])
+                    col2.metric("✅ Aktif Müşteri", summary['skipped_active'])
+                    col3.metric("🔄 Duplicate", summary['skipped_duplicate'])
 
-                        if summary['errors']:
-                            st.warning("⚠️ Bazı satırlarda hata oluştu:")
-                            for error in summary['errors'][:10]:
-                                st.write(f"- Satır {error['row']}: {error['error']}")
-
-                            if len(summary['errors']) > 10:
-                                st.write(f"... ve {len(summary['errors']) - 10} hata daha")
-
-                    except Exception as e:
-                        st.error(f"❌ Hata oluştu: {str(e)}")
-
-    else:  # CSV Upload
-        st.info("""
-        **CSV Formatı (Pipe-delimited: |)**
-
-        **Gerekli Kolonlar:**
-        - FIRST_NAME
-        - SURNAME
-        - CUSTOMER_CODE (benzersiz)
-        - PHONE
-        - HAS_DEPOSIT
-        - TOTAL_DEPOSIT_AMOUNT
-        - LAST_DEPOSIT_TRANSACTION_DATE
-
-        **Otomatik Filtreleme:**
-        - ✅ Sadece yatırım yapmış müşteriler (TOTAL_DEPOSIT_AMOUNT > 0)
-        - ✅ Sadece pasif müşteriler (30+ gün yatırım yok)
-        - ❌ Sıfır yatırımlılar atlanır
-        - ❌ Aktif müşteriler atlanır
-        - ❌ Duplicate kayıtlar atlanır
-        """)
-
-        uploaded_file = st.file_uploader(
-            "CSV dosyası seçin (.csv)",
-            type=['csv'],
-            key='csv_uploader'
-        )
-
-        if uploaded_file:
-            if st.button("📥 CSV Yükle ve İşle", type="primary", key='csv_upload_btn'):
-                with st.spinner("CSV dosyası işleniyor..."):
-                    try:
-                        upload_id, summary = process_csv_file(uploaded_file, user['id'])
-
-                        st.success("✅ CSV dosyası başarıyla işlendi!")
-
-                        # Show detailed metrics
-                        col1, col2, col3 = st.columns(3)
-                        col1.metric("Toplam Satır", summary['total_rows'])
-                        col2.metric("✅ Başarılı", summary['successful'])
-                        col3.metric("❌ Başarısız", summary['failed'])
-
-                        # Show skipped statistics
+                    # Show reactivations
+                    if summary.get('reactivations_detected', 0) > 0:
                         st.divider()
-                        st.subheader("📊 Filtreleme İstatistikleri")
+                        st.success(f"🎉 **{summary['reactivations_detected']} müşteri pasiften aktife döndü ve daha önce aranmıştı!**")
+                        st.info("Bu müşterileri '🎉 Geri Dönenler' tab'ında görebilirsiniz.")
 
-                        col1, col2, col3 = st.columns(3)
-                        col1.metric("🚫 Sıfır Yatırım", summary['skipped_no_deposit'])
-                        col2.metric("✅ Aktif Müşteri", summary['skipped_active'])
-                        col3.metric("🔄 Duplicate", summary['skipped_duplicate'])
+                    if summary['errors']:
+                        st.warning("⚠️ Bazı satırlarda hata oluştu:")
+                        for error in summary['errors'][:10]:
+                            st.write(f"- Satır {error['row']}: {error.get('error', 'Bilinmeyen hata')}")
 
-                        # Show reactivations
-                        if summary.get('reactivations_detected', 0) > 0:
-                            st.divider()
-                            st.success(f"🎉 **{summary['reactivations_detected']} müşteri pasiften aktife döndü ve daha önce aranmıştı!**")
-                            st.info("Bu müşterileri '🎉 Geri Dönenler' tab'ında görebilirsiniz.")
+                        if len(summary['errors']) > 10:
+                            st.write(f"... ve {len(summary['errors']) - 10} hata daha")
 
-                        if summary['errors']:
-                            st.warning("⚠️ Bazı satırlarda hata oluştu:")
-                            for error in summary['errors'][:10]:
-                                st.write(f"- Satır {error['row']}: {error.get('error', 'Bilinmeyen hata')}")
-
-                            if len(summary['errors']) > 10:
-                                st.write(f"... ve {len(summary['errors']) - 10} hata daha")
-
-                    except Exception as e:
-                        st.error(f"❌ Hata oluştu: {str(e)}")
+                except Exception as e:
+                    st.error(f"❌ Hata oluştu: {str(e)}")
 
 # Tab 3: Customer List View
 with tab3:
@@ -259,6 +238,7 @@ with tab3:
             c.surname,
             c.user_code,
             c.phone_number,
+            c.site,
             c.status,
             c.call_attempts,
             c.last_call_status,
@@ -318,15 +298,19 @@ with tab3:
         # Convert to DataFrame for better display
         df_data = []
         for customer in customers:
+            site_name = customer[5].title() if customer[5] else '-'
+            site_emoji = "🎰" if customer[5] == 'truva' else "♠️" if customer[5] == 'venus' else ""
+
             df_data.append({
                 'Ad': customer[1],
                 'Soyad': customer[2],
                 'Kullanıcı Kodu': customer[3],
                 'Telefon': customer[4],
-                'Durum': CUSTOMER_STATUS_LABELS.get(customer[5], customer[5]),
-                'Deneme': f"{customer[6]}/3",
-                'Atanan Op.': customer[9] if customer[9] else '-',
-                'Oluşturma': customer[8][:10] if customer[8] else '-'
+                'Site': f"{site_emoji} {site_name}",
+                'Durum': CUSTOMER_STATUS_LABELS.get(customer[6], customer[6]),
+                'Deneme': f"{customer[7]}/3",
+                'Atanan Op.': customer[10] if customer[10] else '-',
+                'Oluşturma': customer[9][:10] if customer[9] else '-'
             })
 
         df = pd.DataFrame(df_data)

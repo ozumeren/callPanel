@@ -128,6 +128,13 @@ def init_database():
         cursor.execute("ALTER TABLE customers ADD COLUMN last_deposit_date TEXT")
         conn.commit()
 
+    # Migration: Add site column if it doesn't exist (truva or venus)
+    cursor.execute("PRAGMA table_info(customers)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if 'site' not in columns:
+        cursor.execute("ALTER TABLE customers ADD COLUMN site TEXT")
+        conn.commit()
+
     # Create indexes
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)")

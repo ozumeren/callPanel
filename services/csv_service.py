@@ -3,7 +3,7 @@ import json
 from datetime import datetime, timedelta
 from services.database import get_connection
 
-def process_csv_file(file, uploaded_by_id):
+def process_csv_file(file, uploaded_by_id, site='truva'):
     """
     Process uploaded CSV file (pipe-delimited) and import inactive customers
 
@@ -172,9 +172,10 @@ def process_csv_file(file, uploaded_by_id):
                             surname = ?,
                             phone_number = ?,
                             last_deposit_date = ?,
+                            site = ?,
                             updated_at = ?
                         WHERE id = ?
-                    """, (first_name, surname, phone, last_deposit_date_str, datetime.now(), customer_id))
+                    """, (first_name, surname, phone, last_deposit_date_str, site, datetime.now(), customer_id))
 
                     skipped_duplicate += 1
                     continue  # Skip - already exists
@@ -182,9 +183,9 @@ def process_csv_file(file, uploaded_by_id):
                 # New customer - insert
                 cursor.execute("""
                     INSERT INTO customers
-                    (name, surname, user_code, phone_number, last_deposit_date, excel_upload_id)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (first_name, surname, customer_code, phone, last_deposit_date_str, upload_id))
+                    (name, surname, user_code, phone_number, last_deposit_date, site, excel_upload_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (first_name, surname, customer_code, phone, last_deposit_date_str, site, upload_id))
 
                 successful += 1
 
