@@ -15,9 +15,9 @@ st.set_page_config(
 if 'user' in st.session_state:
     user = st.session_state.user
     if user['role'] == 'admin':
-        st.switch_page("pages/1_Admin_Panel.py")
+        st.switch_page("pages/1_📊_Admin_Panel.py")
     else:
-        st.switch_page("pages/2_Operator_Panel.py")
+        st.switch_page("pages/2_📞_Operator_Panel.py")
 
 st.title("📞 Call Center Panel")
 st.subheader("Giriş Yap")
@@ -36,9 +36,9 @@ with st.form("login_form"):
 
             # Redirect based on role
             if user['role'] == 'admin':
-                st.switch_page("pages/1_Admin_Panel.py")
+                st.switch_page("pages/1_📊_Admin_Panel.py")
             else:
-                st.switch_page("pages/2_Operator_Panel.py")
+                st.switch_page("pages/2_📞_Operator_Panel.py")
         else:
             st.error("Kullanıcı adı veya şifre hatalı!")
 
