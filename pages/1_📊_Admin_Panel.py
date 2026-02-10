@@ -221,12 +221,19 @@ with tab3:
     total_in_db = cursor.fetchone()[0]
     cursor.execute("SELECT COUNT(*) FROM customers WHERE status = 'pending'")
     pending_in_db = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM customers WHERE status = 'assigned' AND assigned_to IS NOT NULL")
+    assigned_in_db = cursor.fetchone()[0]
     conn.close()
 
-    col_info1, col_info2, col_info3 = st.columns(3)
-    col_info1.metric("📊 Toplam Müşteri (DB)", total_in_db)
+    col_info1, col_info2, col_info3, col_info4, col_info5 = st.columns([2, 2, 2, 2, 1])
+    col_info1.metric("📊 Toplam Müşteri", total_in_db)
     col_info2.metric("⏳ Havuzda Bekleyen", pending_in_db)
-    col_info3.metric("🔍 Gösterilen (max)", "500")
+    col_info3.metric("🔄 Şu An Atanmış", assigned_in_db)
+    col_info4.metric("🔍 Gösterilen (max)", "500")
+    with col_info5:
+        st.write("")  # Spacing
+        if st.button("🔄", use_container_width=True, help="Yenile"):
+            st.rerun()
 
     st.divider()
 
