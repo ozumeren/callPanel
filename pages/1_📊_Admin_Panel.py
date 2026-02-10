@@ -258,7 +258,7 @@ with tab3:
     with col3:
         sort_by = st.selectbox(
             "Sırala:",
-            ["En Yeni", "En Eski", "Arama Denemesi (Çok → Az)", "Arama Denemesi (Az → Çok)"]
+            ["En Yeni", "En Eski", "Son Arama (Yeni → Eski)", "Son Arama (Eski → Yeni)", "Arama Denemesi (Çok → Az)", "Arama Denemesi (Az → Çok)"]
         )
 
     # Build query
@@ -280,7 +280,8 @@ with tab3:
             c.created_at,
             c.assigned_to,
             u.full_name as assigned_operator,
-            c.available_after
+            c.available_after,
+            c.last_called_at
         FROM customers c
         LEFT JOIN users u ON c.assigned_to = u.id
         WHERE 1=1
@@ -316,6 +317,10 @@ with tab3:
         query += " ORDER BY c.created_at DESC"
     elif sort_by == "En Eski":
         query += " ORDER BY c.created_at ASC"
+    elif sort_by == "Son Arama (Yeni → Eski)":
+        query += " ORDER BY c.last_called_at DESC NULLS LAST"
+    elif sort_by == "Son Arama (Eski → Yeni)":
+        query += " ORDER BY c.last_called_at ASC NULLS LAST"
     elif sort_by == "Arama Denemesi (Çok → Az)":
         query += " ORDER BY c.call_attempts DESC, c.created_at DESC"
     else:  # Az → Çok
@@ -341,6 +346,7 @@ with tab3:
             # Debug: Show assigned_to ID
             assigned_id = customer[10]  # assigned_to (ID)
             assigned_name = customer[11]  # assigned_operator (full_name)
+            last_called = customer[13]  # last_called_at
 
             df_data.append({
                 'Ad': customer[1],
@@ -350,6 +356,7 @@ with tab3:
                 'Site': f"{site_emoji} {site_name}",
                 'Durum': CUSTOMER_STATUS_LABELS.get(customer[6], customer[6]),
                 'Deneme': f"{customer[7]}/3",
+                'Son Arama': last_called[:16] if last_called else '-',
                 'Atanan Op.': assigned_name if assigned_name else ('-' if not assigned_id else f"ID:{assigned_id}"),
                 'Oluşturma': customer[9][:10] if customer[9] else '-'
             })
@@ -371,7 +378,94 @@ with tab3:
             file_name=f"musteriler_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
             mime="text/csv"
         )
-    else:
+
+    # Operator assignment tool (available whether customers found or not)
+    st.divider()
+    st.subheader("🔄 Operatör Değiştir")
+    st.info("Bir müşterinin operatörünü değiştirmek veya atamak için kullanın.")
+
+    with st.form("assign_operator_form"):
+        col1, col2, col3 = st.columns([2, 2, 1])
+
+        with col1:
+            user_code_to_assign = st.text_input(
+                "Kullanıcı Kodu:",
+                placeholder="USR1001",
+                help="Operatör atamak istediğiniz müşterinin kullanıcı kodu"
+            )
+
+        with col2:
+            # Get all active operators
+            conn_op = get_connection()
+            cursor_op = conn_op.cursor()
+            cursor_op.execute("""
+                SELECT id, full_name FROM users
+                WHERE role = 'operator' AND is_active = 1
+                ORDER BY full_name
+            """)
+            operators_list = cursor_op.fetchall()
+            conn_op.close()
+
+            operator_options = ["(Atamayı Kaldır)"] + [f"{op[1]} (ID:{op[0]})" for op in operators_list]
+            selected_operator = st.selectbox(
+                "Operatör Seç:",
+                operator_options,
+                help="Müşteriyi atamak istediğiniz operatör"
+            )
+
+        with col3:
+            st.write("")  # Spacing
+            st.write("")  # Spacing
+            submit_assign = st.form_submit_button("✅ Ata", type="primary", width="stretch")
+
+        if submit_assign:
+            if user_code_to_assign and user_code_to_assign.strip():
+                # Find customer
+                conn_assign = get_connection()
+                cursor_assign = conn_assign.cursor()
+
+                cursor_assign.execute("SELECT id, name, surname FROM customers WHERE user_code = ?", (user_code_to_assign.strip(),))
+                customer_found = cursor_assign.fetchone()
+
+                if customer_found:
+                    customer_id = customer_found[0]
+                    customer_name = f"{customer_found[1]} {customer_found[2]}"
+
+                    # Determine operator ID
+                    if selected_operator == "(Atamayı Kaldır)":
+                        new_operator_id = None
+                        new_status = 'pending'
+                        message = f"✅ {customer_name} ({user_code_to_assign}) için operatör ataması kaldırıldı ve havuza geri eklendi."
+                    else:
+                        # Extract operator ID from selection
+                        operator_id_str = selected_operator.split("ID:")[1].rstrip(")")
+                        new_operator_id = int(operator_id_str)
+                        new_status = 'assigned'
+                        operator_name = selected_operator.split(" (ID:")[0]
+                        message = f"✅ {customer_name} ({user_code_to_assign}) → {operator_name} operatörüne atandı."
+
+                    # Update customer
+                    cursor_assign.execute("""
+                        UPDATE customers
+                        SET assigned_to = ?,
+                            status = ?,
+                            assigned_at = ?,
+                            updated_at = ?
+                        WHERE id = ?
+                    """, (new_operator_id, new_status, datetime.now() if new_operator_id else None, datetime.now(), customer_id))
+
+                    conn_assign.commit()
+                    conn_assign.close()
+
+                    st.success(message)
+                    st.rerun()
+                else:
+                    conn_assign.close()
+                    st.error(f"❌ Kullanıcı kodu '{user_code_to_assign}' bulunamadı!")
+            else:
+                st.error("Lütfen bir kullanıcı kodu girin!")
+
+    if not customers:
         st.info("Filtre kriterlerine uygun müşteri bulunamadı.")
 
 # Tab 4: Reactivations (Customers who returned from passive to active)
@@ -692,7 +786,7 @@ with tab6:
     cursor = conn.cursor()
 
     cursor.execute("""
-        SELECT username, email, full_name, created_at
+        SELECT id, username, email, full_name, created_at
         FROM users
         WHERE role = 'operator' AND is_active = 1
         ORDER BY created_at DESC
@@ -702,7 +796,48 @@ with tab6:
     conn.close()
 
     if operators:
-        df = pd.DataFrame(operators, columns=['Kullanıcı Adı', 'E-posta', 'Ad Soyad', 'Oluşturma Tarihi'])
-        st.dataframe(df, width="stretch", hide_index=True)
+        # Display operators with delete option
+        for op in operators:
+            op_dict = dict(op)
+            with st.expander(f"👤 {op_dict['full_name']} (@{op_dict['username']})", expanded=False):
+                col1, col2, col3 = st.columns([2, 2, 1])
+
+                with col1:
+                    st.write(f"**Kullanıcı Adı:** {op_dict['username']}")
+                    st.write(f"**E-posta:** {op_dict['email']}")
+
+                with col2:
+                    st.write(f"**Ad Soyad:** {op_dict['full_name']}")
+                    st.write(f"**Oluşturma:** {op_dict['created_at'][:10]}")
+
+                with col3:
+                    st.write("")  # Spacing
+                    if st.button("🗑️ Sil", key=f"delete_op_{op_dict['id']}", type="secondary"):
+                        # Soft delete: Set is_active = 0
+                        conn_del = get_connection()
+                        cursor_del = conn_del.cursor()
+
+                        # Release assigned customers
+                        cursor_del.execute("""
+                            UPDATE customers
+                            SET assigned_to = NULL,
+                                status = 'pending',
+                                updated_at = ?
+                            WHERE assigned_to = ?
+                        """, (datetime.now(), op_dict['id']))
+
+                        # Deactivate operator
+                        cursor_del.execute("""
+                            UPDATE users
+                            SET is_active = 0
+                            WHERE id = ?
+                        """, (op_dict['id'],))
+
+                        conn_del.commit()
+                        released_count = cursor_del.rowcount
+                        conn_del.close()
+
+                        st.success(f"✅ Operatör '{op_dict['full_name']}' silindi. {released_count} müşteri havuza geri eklendi.")
+                        st.rerun()
     else:
         st.info("Henüz operatör yok")
