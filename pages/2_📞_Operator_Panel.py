@@ -140,7 +140,7 @@ with tab1:
         st.subheader("📞 Arama Durumu")
         st.write("Arama sonucunu seçin:")
 
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4, col5 = st.columns(5)
 
         with col1:
             if st.button("✅ Ulaşıldı", width="stretch", type="primary"):
@@ -168,6 +168,13 @@ with tab1:
                 return_customer_to_pool(customer['id'], 'busy', notes, user['id'])
                 st.session_state.current_customer = None
                 st.info("Arama kaydedildi! Müşteri tekrar havuza eklendi.")
+                st.rerun()
+
+        with col5:
+            if st.button("📵 Numara Kullanılmıyor", width="stretch", type="secondary"):
+                return_customer_to_pool(customer['id'], 'invalid_phone', notes, user['id'])
+                st.session_state.current_customer = None
+                st.warning("Müşteri 'Numara Geçersiz' olarak işaretlendi. Admin numarayı güncelleyene kadar havuzdan çıkarıldı.")
                 st.rerun()
 
 # ===================================================================

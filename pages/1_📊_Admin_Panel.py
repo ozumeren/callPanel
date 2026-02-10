@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+from datetime import datetime
 from services.csv_service import process_csv_file
 from services.auth_service import create_operator
 from services.database import get_connection
@@ -29,7 +30,7 @@ if st.sidebar.button("🚪 Çıkış Yap"):
 st.title("📊 Admin Paneli")
 
 # Tabs
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["📈 Dashboard", "📤 CSV Yükle", "📋 Müşteri Listesi", "🎉 Geri Dönenler", "👥 Operatör Yönetimi"])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📈 Dashboard", "📤 CSV Yükle", "📋 Müşteri Listesi", "🎉 Geri Dönenler", "📵 Geçersiz Numaralar", "👥 Operatör Yönetimi"])
 
 # Tab 1: Dashboard
 with tab1:
@@ -59,6 +60,9 @@ with tab1:
     cursor.execute("SELECT COUNT(*) FROM customers WHERE status = 'assigned'")
     assigned_customers = cursor.fetchone()[0]
 
+    cursor.execute("SELECT COUNT(*) FROM customers WHERE status = 'invalid_phone'")
+    invalid_phone_customers = cursor.fetchone()[0]
+
     # Today's calls
     cursor.execute("SELECT COUNT(*) FROM call_logs WHERE DATE(created_at) = DATE('now')")
     today_calls = cursor.fetchone()[0]
@@ -70,10 +74,11 @@ with tab1:
     col2.metric("Havuzda Bekleyen", pending_customers)
     col3.metric("Bugünkü Aramalar", today_calls)
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     col1.metric("Tamamlanan", completed_customers)
     col2.metric("Ulaşılamayan", unreachable_customers)
     col3.metric("Şu An Atanmış", assigned_customers)
+    col4.metric("📵 Geçersiz Numara", invalid_phone_customers)
 
     st.divider()
 
@@ -243,7 +248,7 @@ with tab3:
     with col1:
         status_filter = st.selectbox(
             "Durum Filtresi:",
-            ["Tümü", "⏳ Beklemede", "🔄 Atandı", "✅ Tamamlandı", "❌ Ulaşılamadı"],
+            ["Tümü", "⏳ Beklemede", "🔄 Atandı", "✅ Tamamlandı", "❌ Ulaşılamadı", "📵 Numara Geçersiz"],
             index=0  # Default: Tümü
         )
 
@@ -289,7 +294,8 @@ with tab3:
             "⏳ Beklemede": "pending",
             "🔄 Atandı": "assigned",
             "✅ Tamamlandı": "completed",
-            "❌ Ulaşılamadı": "unreachable"
+            "❌ Ulaşılamadı": "unreachable",
+            "📵 Numara Geçersiz": "invalid_phone"
         }
         query += " AND c.status = ?"
         params.append(status_map[status_filter])
@@ -542,8 +548,116 @@ with tab4:
     else:
         st.info("Henüz geri dönen müşteri tespit edilmedi. CSV yüklemeye devam edin.")
 
-# Tab 5: Operator Management
+# Tab 5: Invalid Phone Numbers
 with tab5:
+    st.subheader("📵 Geçersiz Numaralı Müşteriler")
+    st.info("""
+    **Numara Kullanılmıyor**
+
+    Operatörler tarafından "Numara Kullanılmıyor" olarak işaretlenen müşteriler.
+    Numarayı güncelleyip "✅ Numara Güncellendi" butonuna basarak müşteriyi tekrar havuza ekleyebilirsiniz.
+    """)
+
+    # Get invalid phone customers
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT
+            c.id,
+            c.name,
+            c.surname,
+            c.user_code,
+            c.phone_number,
+            c.site,
+            u.full_name as reported_by,
+            cl.notes as last_notes,
+            cl.created_at as reported_at
+        FROM customers c
+        LEFT JOIN call_logs cl ON c.id = cl.customer_id AND cl.call_status = 'invalid_phone'
+        LEFT JOIN users u ON cl.operator_id = u.id
+        WHERE c.status = 'invalid_phone'
+        ORDER BY cl.created_at DESC
+    """)
+
+    invalid_customers = cursor.fetchall()
+    conn.close()
+
+    if invalid_customers:
+        st.write(f"**Toplam:** {len(invalid_customers)} müşteri")
+
+        st.divider()
+
+        # Display each invalid customer with edit form
+        for idx, cust in enumerate(invalid_customers):
+            cust_dict = dict(cust)
+
+            with st.expander(f"📵 {cust_dict['name']} {cust_dict['surname']} - {cust_dict['user_code']}", expanded=True):
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    st.write(f"**Ad Soyad:** {cust_dict['name']} {cust_dict['surname']}")
+                    st.write(f"**Kullanıcı Kodu:** {cust_dict['user_code']}")
+
+                    site_name = cust_dict.get('site', 'bilinmiyor').title() if cust_dict.get('site') else 'Bilinmiyor'
+                    site_emoji = "🎰" if cust_dict.get('site') == 'truva' else "♠️" if cust_dict.get('site') == 'venus' else ""
+                    st.write(f"**Site:** {site_emoji} {site_name}")
+
+                with col2:
+                    st.write(f"**Eski Numara:** `{cust_dict['phone_number']}`")
+                    if cust_dict.get('reported_by'):
+                        st.write(f"**Rapor Eden:** {cust_dict['reported_by']}")
+                    if cust_dict.get('reported_at'):
+                        st.write(f"**Rapor Tarihi:** {cust_dict['reported_at'][:16]}")
+
+                if cust_dict.get('last_notes'):
+                    st.write(f"**Notlar:** {cust_dict['last_notes']}")
+
+                st.divider()
+
+                # Phone number update form
+                with st.form(key=f"update_phone_{cust_dict['id']}"):
+                    col_input, col_button = st.columns([3, 1])
+
+                    with col_input:
+                        new_phone = st.text_input(
+                            "Yeni Telefon Numarası:",
+                            value=cust_dict['phone_number'],
+                            key=f"phone_input_{cust_dict['id']}"
+                        )
+
+                    with col_button:
+                        st.write("")  # Spacing
+                        submit = st.form_submit_button("✅ Numara Güncellendi", type="primary", width="stretch")
+
+                    if submit:
+                        if new_phone and new_phone.strip():
+                            conn = get_connection()
+                            cursor = conn.cursor()
+
+                            # Update phone number and return to pool
+                            cursor.execute("""
+                                UPDATE customers
+                                SET phone_number = ?,
+                                    status = 'pending',
+                                    call_attempts = 0,
+                                    updated_at = ?
+                                WHERE id = ?
+                            """, (new_phone.strip(), datetime.now(), cust_dict['id']))
+
+                            conn.commit()
+                            conn.close()
+
+                            st.success(f"✅ {cust_dict['name']} {cust_dict['surname']} için numara güncellendi ve havuza eklendi!")
+                            st.rerun()
+                        else:
+                            st.error("Lütfen geçerli bir telefon numarası girin!")
+
+    else:
+        st.success("✅ Geçersiz numaralı müşteri yok!")
+
+# Tab 6: Operator Management
+with tab6:
     st.subheader("👥 Yeni Operatör Ekle")
 
     with st.form("create_operator_form"):

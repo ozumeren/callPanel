@@ -33,7 +33,7 @@ def init_database():
             surname TEXT NOT NULL,
             user_code TEXT UNIQUE NOT NULL,
             phone_number TEXT NOT NULL,
-            status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'assigned', 'completed', 'unreachable')),
+            status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'assigned', 'completed', 'unreachable', 'invalid_phone')),
             assigned_to INTEGER,
             assigned_at TIMESTAMP,
             call_attempts INTEGER DEFAULT 0,

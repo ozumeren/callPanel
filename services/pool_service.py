@@ -80,7 +80,7 @@ def return_customer_to_pool(customer_id, call_status, notes, operator_id):
     """
     Process call result and update customer status
 
-    call_status: 'reached', 'no_answer', 'declined', 'busy'
+    call_status: 'reached', 'no_answer', 'declined', 'busy', 'invalid_phone'
     """
     with _db_lock:
         conn = sqlite3.connect(DB_PATH)
@@ -103,6 +103,10 @@ def return_customer_to_pool(customer_id, call_status, notes, operator_id):
                 new_status = 'completed'
                 available_after = None  # Completed customers don't need this
                 new_assigned_to = operator_id  # KEEP operator assignment for reached customers
+            elif call_status == 'invalid_phone':
+                new_status = 'invalid_phone'
+                available_after = None  # Don't call until phone updated
+                new_assigned_to = None  # Release assignment
             elif new_attempts >= MAX_CALL_ATTEMPTS:
                 new_status = 'unreachable'
                 available_after = None  # Unreachable customers won't be called again

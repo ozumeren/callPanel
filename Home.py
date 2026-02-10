@@ -41,5 +41,3 @@ with st.form("login_form"):
                 st.switch_page("pages/2_📞_Operator_Panel.py")
         else:
             st.error("Kullanıcı adı veya şifre hatalı!")
-
-st.info("**Test Kullanıcısı:** admin / admin123")
