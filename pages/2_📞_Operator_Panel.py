@@ -87,22 +87,25 @@ with tab1:
         # Customer card
         st.subheader("👤 Müşteri Bilgileri")
 
+        # Convert to dict for easier access
+        customer_dict = dict(customer) if hasattr(customer, 'keys') else customer
+
         col1, col2 = st.columns(2)
         with col1:
             st.write(f"**Ad:** {customer['name']}")
             st.write(f"**Soyad:** {customer['surname']}")
             # Show site with emoji
-            site_emoji = "🎰" if customer.get('site') == 'truva' else "♠️"
-            site_name = customer.get('site', 'bilinmiyor').title()
+            site_emoji = "🎰" if customer_dict.get('site') == 'truva' else "♠️"
+            site_name = customer_dict.get('site', 'bilinmiyor').title()
             st.write(f"**Site:** {site_emoji} {site_name}")
         with col2:
             st.write(f"**Kullanıcı Kodu:** {customer['user_code']}")
             st.write(f"**Telefon Numarası:** `{customer['phone_number']}`")
 
         # Show how long customer has been inactive
-        if customer.get('last_deposit_date'):
+        if customer_dict.get('last_deposit_date'):
             try:
-                last_deposit = pd.to_datetime(customer['last_deposit_date'])
+                last_deposit = pd.to_datetime(customer_dict['last_deposit_date'])
                 days_inactive = (datetime.now() - last_deposit).days
 
                 # Color code based on inactivity
@@ -113,7 +116,7 @@ with tab1:
                 else:
                     emoji = "🟡"
 
-                st.info(f"{emoji} **Pasif Süresi:** {days_inactive} gün (Son yatırım: {customer['last_deposit_date'][:10]})")
+                st.info(f"{emoji} **Pasif Süresi:** {days_inactive} gün (Son yatırım: {customer_dict['last_deposit_date'][:10]})")
             except:
                 pass
 
@@ -236,8 +239,9 @@ with tab2:
             # Display each contact
             for contact in filtered_contacts:
                 # Show site with emoji in title
-                site_emoji = "🎰" if contact.get('site') == 'truva' else "♠️"
-                site_name = contact.get('site', 'bilinmiyor').title()
+                contact_dict = dict(contact)
+                site_emoji = "🎰" if contact_dict.get('site') == 'truva' else "♠️"
+                site_name = contact_dict.get('site', 'bilinmiyor').title()
 
                 with st.expander(f"👤 {contact['name']} {contact['surname']} - {site_emoji} {site_name} - {contact['phone_number']}", expanded=False):
                     col1, col2 = st.columns(2)
