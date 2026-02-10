@@ -30,7 +30,7 @@ if st.sidebar.button("🚪 Çıkış Yap"):
 st.title("📊 Admin Paneli")
 
 # Tabs
-tab1, tab2, tab3, tab4 = st.tabs(["📈 Dashboard", "📤 Dosya Yükle", "📋 Müşteri Listesi", "👥 Operatör Yönetimi"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["📈 Dashboard", "📤 Dosya Yükle", "📋 Müşteri Listesi", "🎉 Geri Dönenler", "👥 Operatör Yönetimi"])
 
 # Tab 1: Dashboard
 with tab1:
@@ -208,6 +208,12 @@ with tab2:
                         col2.metric("✅ Aktif Müşteri", summary['skipped_active'])
                         col3.metric("🔄 Duplicate", summary['skipped_duplicate'])
 
+                        # Show reactivations
+                        if summary.get('reactivations_detected', 0) > 0:
+                            st.divider()
+                            st.success(f"🎉 **{summary['reactivations_detected']} müşteri pasiften aktife döndü ve daha önce aranmıştı!**")
+                            st.info("Bu müşterileri '🎉 Geri Dönenler' tab'ında görebilirsiniz.")
+
                         if summary['errors']:
                             st.warning("⚠️ Bazı satırlarda hata oluştu:")
                             for error in summary['errors'][:10]:
@@ -343,8 +349,182 @@ with tab3:
     else:
         st.info("Filtre kriterlerine uygun müşteri bulunamadı.")
 
-# Tab 4: Operator Management
+# Tab 4: Reactivations (Customers who returned from passive to active)
 with tab4:
+    st.subheader("🎉 Geri Dönen Müşteriler")
+    st.info("""
+    **Pasiften Aktife Dönen Müşteriler**
+
+    Bu listede, daha önce 30+ gün yatırım yapmamış (pasif) ancak yeni CSV'de tekrar yatırım yapmaya
+    başlamış (aktif) ve operatörlerimiz tarafından aranmış olan müşteriler gösterilir.
+
+    Bu, arama çalışmalarının başarısını ölçmek için kullanılır.
+    """)
+
+    # Filters
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        # Get list of uploads for filter
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT DISTINCT eu.id, eu.filename, eu.created_at
+            FROM reactivations r
+            JOIN excel_uploads eu ON r.excel_upload_id = eu.id
+            ORDER BY eu.created_at DESC
+        """)
+        uploads = cursor.fetchall()
+        conn.close()
+
+        upload_options = ["Tümü"] + [f"{u[1]} ({u[2][:10]})" for u in uploads]
+        selected_upload = st.selectbox("CSV Yükleme:", upload_options)
+
+    with col2:
+        # Operator filter
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT DISTINCT operator_name
+            FROM reactivations
+            WHERE operator_name IS NOT NULL
+            ORDER BY operator_name
+        """)
+        operators = cursor.fetchall()
+        conn.close()
+
+        operator_options = ["Tümü"] + [op[0] for op in operators]
+        selected_operator = st.selectbox("Operatör:", operator_options)
+
+    with col3:
+        date_range = st.selectbox(
+            "Tarih Aralığı:",
+            ["Tümü", "Son 7 Gün", "Son 30 Gün", "Son 90 Gün"]
+        )
+
+    # Build query
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    query = """
+        SELECT
+            r.customer_name || ' ' || r.customer_surname as full_name,
+            r.customer_code,
+            r.phone_number,
+            r.old_last_deposit_date,
+            r.new_last_deposit_date,
+            r.total_calls,
+            r.last_call_status,
+            r.last_call_notes,
+            r.operator_name,
+            r.detected_at,
+            eu.filename
+        FROM reactivations r
+        JOIN excel_uploads eu ON r.excel_upload_id = eu.id
+        WHERE 1=1
+    """
+
+    params = []
+
+    # Upload filter
+    if selected_upload != "Tümü":
+        upload_id = uploads[upload_options.index(selected_upload) - 1][0]
+        query += " AND r.excel_upload_id = ?"
+        params.append(upload_id)
+
+    # Operator filter
+    if selected_operator != "Tümü":
+        query += " AND r.operator_name = ?"
+        params.append(selected_operator)
+
+    # Date filter
+    if date_range == "Son 7 Gün":
+        query += " AND r.detected_at >= datetime('now', '-7 days')"
+    elif date_range == "Son 30 Gün":
+        query += " AND r.detected_at >= datetime('now', '-30 days')"
+    elif date_range == "Son 90 Gün":
+        query += " AND r.detected_at >= datetime('now', '-90 days')"
+
+    query += " ORDER BY r.detected_at DESC"
+
+    cursor.execute(query, params)
+    reactivations = cursor.fetchall()
+    conn.close()
+
+    # Display results
+    if reactivations:
+        st.write(f"**Toplam:** {len(reactivations)} geri dönen müşteri")
+
+        # Statistics
+        total_calls = sum([r[5] for r in reactivations])
+        st.metric("Toplam Arama Yapıldı", total_calls)
+
+        st.divider()
+
+        # Display as expandable cards
+        for react in reactivations:
+            full_name = react[0]
+            customer_code = react[1]
+            phone = react[2]
+            old_date = react[3][:10] if react[3] else "Bilinmiyor"
+            new_date = react[4][:10] if react[4] else "Bilinmiyor"
+            total_calls_customer = react[5]
+            last_status = react[6]
+            last_notes = react[7]
+            operator = react[8]
+            detected = react[9][:10] if react[9] else "Bilinmiyor"
+            upload_file = react[10]
+
+            with st.expander(f"👤 {full_name} ({customer_code}) - {operator}"):
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    st.write(f"**Telefon:** {phone}")
+                    st.write(f"**Eski Yatırım Tarihi:** {old_date}")
+                    st.write(f"**Yeni Yatırım Tarihi:** {new_date}")
+
+                with col2:
+                    st.write(f"**Toplam Arama:** {total_calls_customer}")
+                    st.write(f"**Son Arama Durumu:** {last_status}")
+                    st.write(f"**Tespit Tarihi:** {detected}")
+
+                if last_notes:
+                    st.write(f"**Son Notlar:**")
+                    st.text_area("", last_notes, height=100, disabled=True, key=f"notes_{react[1]}")
+
+                st.caption(f"📁 Yüklendiği Dosya: {upload_file}")
+
+        # Export option
+        st.divider()
+        df_data = []
+        for react in reactivations:
+            df_data.append({
+                'Ad Soyad': react[0],
+                'Kullanıcı Kodu': react[1],
+                'Telefon': react[2],
+                'Eski Tarih': react[3][:10] if react[3] else '',
+                'Yeni Tarih': react[4][:10] if react[4] else '',
+                'Toplam Arama': react[5],
+                'Son Durum': react[6],
+                'Notlar': react[7] if react[7] else '',
+                'Operatör': react[8],
+                'Tespit': react[9][:10] if react[9] else ''
+            })
+
+        df = pd.DataFrame(df_data)
+        csv_export = df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 CSV Olarak İndir",
+            data=csv_export,
+            file_name=f"geri_donenler_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv"
+        )
+
+    else:
+        st.info("Henüz geri dönen müşteri tespit edilmedi. CSV yüklemeye devam edin.")
+
+# Tab 5: Operator Management
+with tab5:
     st.subheader("👥 Yeni Operatör Ekle")
 
     with st.form("create_operator_form"):

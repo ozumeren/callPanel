@@ -33,6 +33,7 @@ def process_csv_file(file, uploaded_by_id):
     skipped_no_deposit = 0
     skipped_active = 0
     skipped_duplicate = 0
+    reactivations_detected = 0
 
     try:
         # Read CSV with pipe delimiter
@@ -88,18 +89,102 @@ def process_csv_file(file, uploaded_by_id):
                         # If date parsing fails, treat as inactive
                         pass
 
-                # FILTER 3: Check for duplicates
-                cursor.execute("SELECT id FROM customers WHERE user_code = ?", (customer_code,))
-                if cursor.fetchone():
-                    skipped_duplicate += 1
-                    continue  # Skip duplicates
+                # FILTER 3: Check for duplicates and reactivations
+                cursor.execute("""
+                    SELECT id, last_deposit_date FROM customers WHERE user_code = ?
+                """, (customer_code,))
+                existing_customer = cursor.fetchone()
 
-                # All filters passed - insert customer
+                if existing_customer:
+                    # Customer exists - update and check for reactivation
+                    customer_id = existing_customer[0]
+                    old_last_deposit_date_str = existing_customer[1]
+
+                    # Check for reactivation (passive → active transition)
+                    if old_last_deposit_date_str and last_deposit_date_str:
+                        try:
+                            old_date = pd.to_datetime(old_last_deposit_date_str)
+                            new_date = pd.to_datetime(last_deposit_date_str)
+                            now = datetime.now()
+
+                            # Was customer passive before? (old deposit 30+ days ago)
+                            old_cutoff = now - timedelta(days=30)
+                            was_passive = old_date < old_cutoff
+
+                            # Is customer active now? (new deposit within 30 days)
+                            is_active_now = new_date >= cutoff_date
+
+                            # REACTIVATION: passive → active
+                            if was_passive and is_active_now:
+                                # Check if customer was called by operators
+                                cursor.execute("""
+                                    SELECT COUNT(*), MAX(call_status), operator_id
+                                    FROM call_logs
+                                    WHERE customer_id = ?
+                                    GROUP BY customer_id
+                                """, (customer_id,))
+                                call_info = cursor.fetchone()
+
+                                if call_info and call_info[0] > 0:
+                                    total_calls = call_info[0]
+                                    last_call_status = call_info[1]
+                                    last_operator_id = call_info[2]
+
+                                    # Get last call notes
+                                    cursor.execute("""
+                                        SELECT notes, operator_id FROM call_logs
+                                        WHERE customer_id = ?
+                                        ORDER BY created_at DESC
+                                        LIMIT 1
+                                    """, (customer_id,))
+                                    last_call = cursor.fetchone()
+                                    last_notes = last_call[0] if last_call else None
+                                    actual_last_operator_id = last_call[1] if last_call else last_operator_id
+
+                                    # Get operator name
+                                    cursor.execute("SELECT full_name FROM users WHERE id = ?", (actual_last_operator_id,))
+                                    operator_result = cursor.fetchone()
+                                    operator_name = operator_result[0] if operator_result else "Bilinmiyor"
+
+                                    # Insert reactivation record
+                                    cursor.execute("""
+                                        INSERT INTO reactivations
+                                        (customer_id, excel_upload_id, customer_code, customer_name,
+                                         customer_surname, phone_number, old_last_deposit_date,
+                                         new_last_deposit_date, was_called, total_calls,
+                                         last_call_status, last_call_notes, operator_id, operator_name)
+                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
+                                    """, (customer_id, upload_id, customer_code, first_name, surname,
+                                          phone, old_last_deposit_date_str, last_deposit_date_str,
+                                          total_calls, last_call_status, last_notes,
+                                          actual_last_operator_id, operator_name))
+
+                                    reactivations_detected += 1
+
+                        except Exception as e:
+                            # If date parsing fails, skip reactivation check
+                            pass
+
+                    # Update existing customer with new data
+                    cursor.execute("""
+                        UPDATE customers
+                        SET name = ?,
+                            surname = ?,
+                            phone_number = ?,
+                            last_deposit_date = ?,
+                            updated_at = ?
+                        WHERE id = ?
+                    """, (first_name, surname, phone, last_deposit_date_str, datetime.now(), customer_id))
+
+                    skipped_duplicate += 1
+                    continue  # Skip - already exists
+
+                # New customer - insert
                 cursor.execute("""
                     INSERT INTO customers
-                    (name, surname, user_code, phone_number, excel_upload_id)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (first_name, surname, customer_code, phone, upload_id))
+                    (name, surname, user_code, phone_number, last_deposit_date, excel_upload_id)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (first_name, surname, customer_code, phone, last_deposit_date_str, upload_id))
 
                 successful += 1
 
@@ -115,7 +200,8 @@ def process_csv_file(file, uploaded_by_id):
         summary_text = f"Başarılı: {successful}, Başarısız: {failed}, " \
                       f"Atlandı (Sıfır Yatırım): {skipped_no_deposit}, " \
                       f"Atlandı (Aktif): {skipped_active}, " \
-                      f"Atlandı (Duplicate): {skipped_duplicate}"
+                      f"Atlandı (Duplicate): {skipped_duplicate}, " \
+                      f"Geri Dönenler: {reactivations_detected}"
 
         cursor.execute("""
             UPDATE excel_uploads
@@ -137,6 +223,7 @@ def process_csv_file(file, uploaded_by_id):
             'skipped_no_deposit': skipped_no_deposit,
             'skipped_active': skipped_active,
             'skipped_duplicate': skipped_duplicate,
+            'reactivations_detected': reactivations_detected,
             'errors': error_log
         }
 

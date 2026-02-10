@@ -82,6 +82,31 @@ def init_database():
         )
     """)
 
+    # Create reactivations table (customers who went from inactive to active)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS reactivations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            customer_id INTEGER NOT NULL,
+            excel_upload_id INTEGER NOT NULL,
+            customer_code TEXT NOT NULL,
+            customer_name TEXT NOT NULL,
+            customer_surname TEXT NOT NULL,
+            phone_number TEXT NOT NULL,
+            old_last_deposit_date TEXT,
+            new_last_deposit_date TEXT,
+            was_called INTEGER DEFAULT 0,
+            total_calls INTEGER DEFAULT 0,
+            last_call_status TEXT,
+            last_call_notes TEXT,
+            operator_id INTEGER,
+            operator_name TEXT,
+            detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (customer_id) REFERENCES customers(id),
+            FOREIGN KEY (excel_upload_id) REFERENCES excel_uploads(id),
+            FOREIGN KEY (operator_id) REFERENCES users(id)
+        )
+    """)
+
     # Migration: Add last_operator_id column if it doesn't exist
     cursor.execute("PRAGMA table_info(customers)")
     columns = [row[1] for row in cursor.fetchall()]
@@ -96,6 +121,13 @@ def init_database():
         cursor.execute("ALTER TABLE customers ADD COLUMN available_after TIMESTAMP")
         conn.commit()
 
+    # Migration: Add last_deposit_date column if it doesn't exist (for CSV imports)
+    cursor.execute("PRAGMA table_info(customers)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if 'last_deposit_date' not in columns:
+        cursor.execute("ALTER TABLE customers ADD COLUMN last_deposit_date TEXT")
+        conn.commit()
+
     # Create indexes
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)")
@@ -108,6 +140,10 @@ def init_database():
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_call_logs_operator ON call_logs(operator_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_call_logs_created ON call_logs(created_at)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_excel_uploads_user ON excel_uploads(uploaded_by)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_reactivations_customer ON reactivations(customer_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_reactivations_upload ON reactivations(excel_upload_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_reactivations_operator ON reactivations(operator_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_reactivations_detected ON reactivations(detected_at)")
 
     # Seed admin user if not exists
     cursor.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'")
