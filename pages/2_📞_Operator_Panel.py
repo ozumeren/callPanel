@@ -42,7 +42,7 @@ with tab1:
 
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
-            if st.button("🎯 Müşteri Çek", use_container_width=True, type="primary"):
+            if st.button("🎯 Müşteri Çek", width="stretch", type="primary"):
                 customer = pull_customer_for_operator(user['id'])
 
                 if customer:
@@ -143,28 +143,28 @@ with tab1:
         col1, col2, col3, col4 = st.columns(4)
 
         with col1:
-            if st.button("✅ Ulaşıldı", use_container_width=True, type="primary"):
+            if st.button("✅ Ulaşıldı", width="stretch", type="primary"):
                 return_customer_to_pool(customer['id'], 'reached', notes, user['id'])
                 st.session_state.current_customer = None
                 st.success("Arama kaydedildi! Müşteri tamamlandı olarak işaretlendi.")
                 st.rerun()
 
         with col2:
-            if st.button("📵 Telefonu Açmadı", use_container_width=True):
+            if st.button("📵 Telefonu Açmadı", width="stretch"):
                 return_customer_to_pool(customer['id'], 'no_answer', notes, user['id'])
                 st.session_state.current_customer = None
                 st.info("Arama kaydedildi! Müşteri tekrar havuza eklendi.")
                 st.rerun()
 
         with col3:
-            if st.button("🚫 Meşgule Attı", use_container_width=True):
+            if st.button("🚫 Meşgule Attı", width="stretch"):
                 return_customer_to_pool(customer['id'], 'declined', notes, user['id'])
                 st.session_state.current_customer = None
                 st.info("Arama kaydedildi! Müşteri tekrar havuza eklendi.")
                 st.rerun()
 
         with col4:
-            if st.button("⏳ Meşgul", use_container_width=True):
+            if st.button("⏳ Meşgul", width="stretch"):
                 return_customer_to_pool(customer['id'], 'busy', notes, user['id'])
                 st.session_state.current_customer = None
                 st.info("Arama kaydedildi! Müşteri tekrar havuza eklendi.")
@@ -268,7 +268,7 @@ with tab2:
                         st.write("**Son Görüşme Notları:** _Not girilmemiş_")
 
                     # Action button
-                    if st.button(f"📞 Tekrar Ara", key=f"call_{contact['id']}", use_container_width=True):
+                    if st.button(f"📞 Tekrar Ara", key=f"call_{contact['id']}", width="stretch"):
                         st.info(f"📞 {contact['phone_number']} numarasını arayın")
                         st.balloons()
 

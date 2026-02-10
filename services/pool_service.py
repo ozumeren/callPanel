@@ -98,23 +98,26 @@ def return_customer_to_pool(customer_id, call_status, notes, operator_id):
             current_attempts = cursor.fetchone()[0]
             new_attempts = current_attempts + 1
 
-            # Determine new status
+            # Determine new status and assigned_to
             if call_status == 'reached':
                 new_status = 'completed'
                 available_after = None  # Completed customers don't need this
+                new_assigned_to = operator_id  # KEEP operator assignment for reached customers
             elif new_attempts >= MAX_CALL_ATTEMPTS:
                 new_status = 'unreachable'
                 available_after = None  # Unreachable customers won't be called again
+                new_assigned_to = None  # Release assignment
             else:
                 new_status = 'pending'
                 # Set available_after based on configuration (default: 7 days)
                 available_after = datetime.now() + timedelta(days=RECALL_WAITING_DAYS)
+                new_assigned_to = None  # Release assignment (back to pool)
 
             # Update customer (save last_operator_id for continuity)
             cursor.execute("""
                 UPDATE customers
                 SET status = ?,
-                    assigned_to = NULL,
+                    assigned_to = ?,
                     call_attempts = ?,
                     last_call_status = ?,
                     last_called_at = ?,
@@ -122,7 +125,7 @@ def return_customer_to_pool(customer_id, call_status, notes, operator_id):
                     available_after = ?,
                     updated_at = ?
                 WHERE id = ?
-            """, (new_status, new_attempts, call_status, datetime.now(), operator_id, available_after, datetime.now(), customer_id))
+            """, (new_status, new_assigned_to, new_attempts, call_status, datetime.now(), operator_id, available_after, datetime.now(), customer_id))
 
             conn.commit()
 

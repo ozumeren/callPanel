@@ -123,7 +123,7 @@ with tab1:
             })
 
         df = pd.DataFrame(df_data)
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.dataframe(df, width="stretch", hide_index=True)
     else:
         st.info("Henüz operatör yok")
 
@@ -232,7 +232,7 @@ with tab3:
     col_info4.metric("🔍 Gösterilen (max)", "500")
     with col_info5:
         st.write("")  # Spacing
-        if st.button("🔄", use_container_width=True, help="Yenile"):
+        if st.button("🔄", width="stretch", help="Yenile"):
             st.rerun()
 
     st.divider()
@@ -351,7 +351,7 @@ with tab3:
         df = pd.DataFrame(df_data)
         st.dataframe(
             df,
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             height=400
         )
@@ -589,6 +589,6 @@ with tab5:
 
     if operators:
         df = pd.DataFrame(operators, columns=['Kullanıcı Adı', 'E-posta', 'Ad Soyad', 'Oluşturma Tarihi'])
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.dataframe(df, width="stretch", hide_index=True)
     else:
         st.info("Henüz operatör yok")
