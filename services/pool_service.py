@@ -2,7 +2,7 @@ import sqlite3
 import threading
 from datetime import datetime, timedelta
 from services.database import get_connection, DB_PATH
-from utils.config import RECALL_WAITING_DAYS, MAX_CALL_ATTEMPTS
+from utils.config import RECALL_WAITING_DAYS, MAX_CALL_ATTEMPTS, COOLDOWN_DAYS
 
 # Global lock for concurrent access
 _db_lock = threading.Lock()
@@ -13,8 +13,10 @@ def pull_customer_for_operator(operator_id):
     Thread-safe with explicit locking for SQLite
 
     PRIORITY LOGIC:
-    1. First try to get customers previously handled by this operator
-    2. If none, get from general pool (FIFO with priority)
+    1. First try to get customers previously handled by this operator (PRIMARY POOL)
+    2. If none, get from general PRIMARY pool (is_reserve = 0)
+    3. If PRIMARY pool is empty, try RESERVE pool (is_reserve = 1)
+       - Reserve: total_deposit < 100k TRY AND inactive 180+ days
 
     Returns: Customer dict or None
     """
@@ -24,44 +26,75 @@ def pull_customer_for_operator(operator_id):
         cursor = conn.cursor()
 
         try:
-            # STEP 1: Try to get customer previously handled by this operator
+            # STEP 1: Try to get customer previously handled by this operator (PRIMARY POOL ONLY)
             # Only show customers where waiting period has passed OR never called before
+            # Note: Customers with call_attempts >= MAX_CALL_ATTEMPTS are included IF cooldown period passed
             cursor.execute("""
                 SELECT * FROM customers
                 WHERE status = 'pending'
-                  AND call_attempts < ?
                   AND last_operator_id = ?
+                  AND is_reserve = 0
                   AND (assigned_to IS NULL OR assigned_at < datetime('now', '-10 minutes'))
                   AND (available_after IS NULL OR available_after <= datetime('now'))
                 ORDER BY priority DESC, created_at ASC
                 LIMIT 1
-            """, (MAX_CALL_ATTEMPTS, operator_id))
+            """, (operator_id,))
 
             customer = cursor.fetchone()
 
-            # STEP 2: If no previous customer, get from general pool
+            # STEP 2: If no previous customer, get from general PRIMARY pool
             if not customer:
                 cursor.execute("""
                     SELECT * FROM customers
                     WHERE status = 'pending'
-                      AND call_attempts < ?
+                      AND is_reserve = 0
                       AND (assigned_to IS NULL OR assigned_at < datetime('now', '-10 minutes'))
                       AND (available_after IS NULL OR available_after <= datetime('now'))
                     ORDER BY priority DESC, created_at ASC
                     LIMIT 1
-                """, (MAX_CALL_ATTEMPTS,))
+                """)
+                customer = cursor.fetchone()
+
+            # STEP 3: If PRIMARY pool is empty, try RESERVE pool
+            if not customer:
+                cursor.execute("""
+                    SELECT * FROM customers
+                    WHERE status = 'pending'
+                      AND is_reserve = 1
+                      AND (assigned_to IS NULL OR assigned_at < datetime('now', '-10 minutes'))
+                      AND (available_after IS NULL OR available_after <= datetime('now'))
+                    ORDER BY priority DESC, created_at ASC
+                    LIMIT 1
+                """)
                 customer = cursor.fetchone()
 
             if customer:
+                # Check if customer completed cooldown period (call_attempts >= 3 and available_after passed)
+                reset_attempts = False
+                if customer['call_attempts'] >= MAX_CALL_ATTEMPTS:
+                    # Customer completed cooldown - reset attempts
+                    reset_attempts = True
+
                 # Assign to operator
-                cursor.execute("""
-                    UPDATE customers
-                    SET status = 'assigned',
-                        assigned_to = ?,
-                        assigned_at = ?,
-                        updated_at = ?
-                    WHERE id = ?
-                """, (operator_id, datetime.now(), datetime.now(), customer['id']))
+                if reset_attempts:
+                    cursor.execute("""
+                        UPDATE customers
+                        SET status = 'assigned',
+                            assigned_to = ?,
+                            assigned_at = ?,
+                            call_attempts = 0,
+                            updated_at = ?
+                        WHERE id = ?
+                    """, (operator_id, datetime.now(), datetime.now(), customer['id']))
+                else:
+                    cursor.execute("""
+                        UPDATE customers
+                        SET status = 'assigned',
+                            assigned_to = ?,
+                            assigned_at = ?,
+                            updated_at = ?
+                        WHERE id = ?
+                    """, (operator_id, datetime.now(), datetime.now(), customer['id']))
 
                 conn.commit()
 
@@ -108,8 +141,9 @@ def return_customer_to_pool(customer_id, call_status, notes, operator_id):
                 available_after = None  # Don't call until phone updated
                 new_assigned_to = None  # Release assignment
             elif new_attempts >= MAX_CALL_ATTEMPTS:
-                new_status = 'unreachable'
-                available_after = None  # Unreachable customers won't be called again
+                # After max attempts, enter cooldown period (14 days)
+                new_status = 'pending'  # Keep in pool but unavailable
+                available_after = datetime.now() + timedelta(days=COOLDOWN_DAYS)
                 new_assigned_to = None  # Release assignment
             else:
                 new_status = 'pending'

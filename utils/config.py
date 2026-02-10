@@ -17,5 +17,10 @@ RECALL_WAITING_DAYS = 7
 STALE_ASSIGNMENT_MINUTES = 10
 
 # MAXIMUM CALL ATTEMPTS
-# How many times to try calling a customer before marking unreachable
+# How many times to try calling a customer before cooldown
 MAX_CALL_ATTEMPTS = 3
+
+# COOLDOWN PERIOD AFTER MAX ATTEMPTS
+# How many days to wait after MAX_CALL_ATTEMPTS before resetting and re-adding to pool
+# After this period, call_attempts resets to 0 and customer becomes available again
+COOLDOWN_DAYS = 14

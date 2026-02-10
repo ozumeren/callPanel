@@ -136,45 +136,59 @@ with tab1:
 
         st.divider()
 
-        # Status buttons
+        # Status selection with confirmation
         st.subheader("📞 Arama Durumu")
-        st.write("Arama sonucunu seçin:")
+        st.write("Arama sonucunu seçin ve 'Gönder' butonuna basın:")
 
-        col1, col2, col3, col4, col5 = st.columns(5)
+        # Radio button selection
+        call_status_options = {
+            "✅ Ulaşıldı": "reached",
+            "📵 Telefonu Açmadı": "no_answer",
+            "🚫 Meşgule Attı": "declined",
+            "⏳ Meşgul": "busy",
+            "📵 Numara Kullanılmıyor": "invalid_phone"
+        }
 
-        with col1:
-            if st.button("✅ Ulaşıldı", width="stretch", type="primary"):
-                return_customer_to_pool(customer['id'], 'reached', notes, user['id'])
-                st.session_state.current_customer = None
-                st.success("Arama kaydedildi! Müşteri tamamlandı olarak işaretlendi.")
-                st.rerun()
+        selected_status_label = st.radio(
+            "Durum Seçin:",
+            options=list(call_status_options.keys()),
+            index=None,  # No default selection
+            horizontal=False,
+            key="call_status_radio"
+        )
 
+        st.divider()
+
+        # Submit button (only enabled if status is selected)
+        col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
-            if st.button("📵 Telefonu Açmadı", width="stretch"):
-                return_customer_to_pool(customer['id'], 'no_answer', notes, user['id'])
-                st.session_state.current_customer = None
-                st.info("Arama kaydedildi! Müşteri tekrar havuza eklendi.")
-                st.rerun()
+            submit_enabled = selected_status_label is not None
 
-        with col3:
-            if st.button("🚫 Meşgule Attı", width="stretch"):
-                return_customer_to_pool(customer['id'], 'declined', notes, user['id'])
-                st.session_state.current_customer = None
-                st.info("Arama kaydedildi! Müşteri tekrar havuza eklendi.")
-                st.rerun()
+            if not submit_enabled:
+                st.warning("⚠️ Lütfen önce bir arama durumu seçin")
 
-        with col4:
-            if st.button("⏳ Meşgul", width="stretch"):
-                return_customer_to_pool(customer['id'], 'busy', notes, user['id'])
-                st.session_state.current_customer = None
-                st.info("Arama kaydedildi! Müşteri tekrar havuza eklendi.")
-                st.rerun()
+            if st.button(
+                "📤 Gönder ve Kaydet",
+                type="primary",
+                disabled=not submit_enabled,
+                width="stretch",
+                key="submit_call_status"
+            ):
+                # Get the actual status value
+                selected_status = call_status_options[selected_status_label]
 
-        with col5:
-            if st.button("📵 Numara Kullanılmıyor", width="stretch", type="secondary"):
-                return_customer_to_pool(customer['id'], 'invalid_phone', notes, user['id'])
+                # Process the call result
+                return_customer_to_pool(customer['id'], selected_status, notes, user['id'])
                 st.session_state.current_customer = None
-                st.warning("Müşteri 'Numara Geçersiz' olarak işaretlendi. Admin numarayı güncelleyene kadar havuzdan çıkarıldı.")
+
+                # Show appropriate message based on status
+                if selected_status == 'reached':
+                    st.success("✅ Arama kaydedildi! Müşteri tamamlandı olarak işaretlendi.")
+                elif selected_status == 'invalid_phone':
+                    st.warning("📵 Müşteri 'Numara Geçersiz' olarak işaretlendi. Admin numarayı güncelleyene kadar havuzdan çıkarıldı.")
+                else:
+                    st.info("📝 Arama kaydedildi! Müşteri tekrar havuza eklendi.")
+
                 st.rerun()
 
 # ===================================================================

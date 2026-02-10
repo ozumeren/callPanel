@@ -5,7 +5,7 @@ from services.csv_service import process_csv_file
 from services.auth_service import create_operator
 from services.database import get_connection
 from services.pool_service import release_stale_assignments
-from utils.constants import CUSTOMER_STATUS_LABELS
+from utils.constants import CUSTOMER_STATUS_LABELS, CALL_STATUS_LABELS
 
 st.set_page_config(page_title="Admin Paneli", page_icon="📊", layout="wide")
 
@@ -63,6 +63,13 @@ with tab1:
     cursor.execute("SELECT COUNT(*) FROM customers WHERE status = 'invalid_phone'")
     invalid_phone_customers = cursor.fetchone()[0]
 
+    # Reserve pool counts (low value + very old customers)
+    cursor.execute("SELECT COUNT(*) FROM customers WHERE status = 'pending' AND is_reserve = 0")
+    primary_pool = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM customers WHERE status = 'pending' AND is_reserve = 1")
+    reserve_pool = cursor.fetchone()[0]
+
     # Today's calls
     cursor.execute("SELECT COUNT(*) FROM call_logs WHERE DATE(created_at) = DATE('now')")
     today_calls = cursor.fetchone()[0]
@@ -79,6 +86,13 @@ with tab1:
     col2.metric("Ulaşılamayan", unreachable_customers)
     col3.metric("Şu An Atanmış", assigned_customers)
     col4.metric("📵 Geçersiz Numara", invalid_phone_customers)
+
+    # Pool tier breakdown
+    st.info("**Havuz Dağılımı:** 💎 Birincil (öncelikli müşteriler) | 🔄 Rezerv (düşük yatırım + 180+ gün pasif)")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("💎 Birincil Havuz", primary_pool)
+    col2.metric("🔄 Rezerv Havuz", reserve_pool)
+    col3.metric("📊 Havuz Toplam", primary_pool + reserve_pool)
 
     st.divider()
 
@@ -131,6 +145,74 @@ with tab1:
         st.dataframe(df, width="stretch", hide_index=True)
     else:
         st.info("Henüz operatör yok")
+
+    st.divider()
+
+    # DANGER ZONE: Delete all records
+    st.subheader("⚠️ Tehlikeli Bölge")
+
+    with st.expander("🗑️ Tüm Müşteri Kayıtlarını Sil", expanded=False):
+        st.error("""
+        **DİKKAT:** Bu işlem geri alınamaz!
+
+        Silinecekler:
+        - ❌ Tüm müşteri kayıtları
+        - ❌ Tüm arama logları
+        - ❌ Tüm reaktivasyon kayıtları
+        - ❌ Tüm CSV yükleme kayıtları
+
+        Korunacaklar:
+        - ✅ Kullanıcı hesapları (Admin & Operatörler)
+        """)
+
+        confirm = st.checkbox("⚠️ Evet, TÜM kayıtları silmek istiyorum (bu işlem geri alınamaz)")
+
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            if st.button(
+                "🗑️ TÜM KAYITLARI SİL",
+                type="primary",
+                disabled=not confirm,
+                width="stretch"
+            ):
+                try:
+                    conn = get_connection()
+                    cursor = conn.cursor()
+
+                    # Delete in correct order (foreign key constraints)
+                    cursor.execute("DELETE FROM call_logs")
+                    deleted_logs = cursor.rowcount
+
+                    cursor.execute("DELETE FROM reactivations")
+                    deleted_reactivations = cursor.rowcount
+
+                    cursor.execute("DELETE FROM customers")
+                    deleted_customers = cursor.rowcount
+
+                    cursor.execute("DELETE FROM excel_uploads")
+                    deleted_uploads = cursor.rowcount
+
+                    conn.commit()
+                    conn.close()
+
+                    st.success(f"""
+                    ✅ Tüm kayıtlar başarıyla silindi!
+
+                    - 🗑️ {deleted_customers} müşteri
+                    - 🗑️ {deleted_logs} arama logu
+                    - 🗑️ {deleted_reactivations} reaktivasyon kaydı
+                    - 🗑️ {deleted_uploads} CSV yükleme kaydı
+                    """)
+
+                    st.balloons()
+
+                    # Refresh page after 2 seconds
+                    import time
+                    time.sleep(2)
+                    st.rerun()
+
+                except Exception as e:
+                    st.error(f"❌ Hata oluştu: {str(e)}")
 
 # Tab 2: CSV Upload
 with tab2:
@@ -243,7 +325,7 @@ with tab3:
     st.divider()
 
     # Filters
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
 
     with col1:
         status_filter = st.selectbox(
@@ -253,9 +335,16 @@ with tab3:
         )
 
     with col2:
-        search_query = st.text_input("🔍 Ara (Ad, Soyad, Kod, Telefon):", "")
+        pool_filter = st.selectbox(
+            "Havuz Filtresi:",
+            ["Tümü", "💎 Birincil", "🔄 Rezerv"],
+            index=0  # Default: Tümü
+        )
 
     with col3:
+        search_query = st.text_input("🔍 Ara (Ad, Soyad, Kod, Telefon):", "")
+
+    with col4:
         sort_by = st.selectbox(
             "Sırala:",
             ["En Yeni", "En Eski", "Son Arama (Yeni → Eski)", "Son Arama (Eski → Yeni)", "Arama Denemesi (Çok → Az)", "Arama Denemesi (Az → Çok)"]
@@ -265,7 +354,7 @@ with tab3:
     conn = get_connection()
     cursor = conn.cursor()
 
-    # Base query
+    # Base query with last call notes
     query = """
         SELECT
             c.id,
@@ -281,9 +370,14 @@ with tab3:
             c.assigned_to,
             u.full_name as assigned_operator,
             c.available_after,
-            c.last_called_at
+            c.last_called_at,
+            cl.notes as last_notes,
+            c.is_reserve
         FROM customers c
         LEFT JOIN users u ON c.assigned_to = u.id
+        LEFT JOIN call_logs cl ON cl.id = (
+            SELECT MAX(id) FROM call_logs WHERE customer_id = c.id
+        )
         WHERE 1=1
     """
 
@@ -300,6 +394,13 @@ with tab3:
         }
         query += " AND c.status = ?"
         params.append(status_map[status_filter])
+
+    # Pool filter
+    if pool_filter != "Tümü":
+        if pool_filter == "💎 Birincil":
+            query += " AND c.is_reserve = 0"
+        else:  # Rezerv
+            query += " AND c.is_reserve = 1"
 
     # Search filter
     if search_query:
@@ -347,6 +448,16 @@ with tab3:
             assigned_id = customer[10]  # assigned_to (ID)
             assigned_name = customer[11]  # assigned_operator (full_name)
             last_called = customer[13]  # last_called_at
+            last_notes = customer[14]  # last_notes
+            is_reserve = customer[15]  # is_reserve
+
+            # Truncate notes for display (first 40 chars)
+            notes_display = '-'
+            if last_notes:
+                notes_display = last_notes[:40] + '...' if len(last_notes) > 40 else last_notes
+
+            # Pool tier display
+            pool_tier = "🔄 Rezerv" if is_reserve == 1 else "💎 Birincil"
 
             df_data.append({
                 'Ad': customer[1],
@@ -354,9 +465,11 @@ with tab3:
                 'Kullanıcı Kodu': customer[3],
                 'Telefon': customer[4],
                 'Site': f"{site_emoji} {site_name}",
+                'Havuz': pool_tier,
                 'Durum': CUSTOMER_STATUS_LABELS.get(customer[6], customer[6]),
                 'Deneme': f"{customer[7]}/3",
                 'Son Arama': last_called[:16] if last_called else '-',
+                'Son Not': notes_display,
                 'Atanan Op.': assigned_name if assigned_name else ('-' if not assigned_id else f"ID:{assigned_id}"),
                 'Oluşturma': customer[9][:10] if customer[9] else '-'
             })
@@ -378,6 +491,74 @@ with tab3:
             file_name=f"musteriler_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
             mime="text/csv"
         )
+
+    # Note details viewer
+    st.divider()
+    st.subheader("📝 Not Detayları")
+
+    with st.form("view_notes_form"):
+        col_note1, col_note2 = st.columns([3, 1])
+
+        with col_note1:
+            user_code_notes = st.text_input(
+                "Kullanıcı Kodu:",
+                placeholder="USR1001",
+                help="Notlarını görmek istediğiniz müşterinin kullanıcı kodu"
+            )
+
+        with col_note2:
+            st.write("")  # Spacing
+            view_notes_btn = st.form_submit_button("🔍 Notları Göster", width="stretch")
+
+        if view_notes_btn and user_code_notes:
+            conn_notes = get_connection()
+            cursor_notes = conn_notes.cursor()
+
+            # Get customer info
+            cursor_notes.execute("SELECT id, name, surname FROM customers WHERE user_code = ?", (user_code_notes.strip(),))
+            cust = cursor_notes.fetchone()
+
+            if cust:
+                st.success(f"👤 **{cust[1]} {cust[2]}** ({user_code_notes})")
+
+                # Get all call logs with notes
+                cursor_notes.execute("""
+                    SELECT
+                        cl.created_at,
+                        cl.call_status,
+                        cl.notes,
+                        u.full_name as operator_name
+                    FROM call_logs cl
+                    LEFT JOIN users u ON cl.operator_id = u.id
+                    WHERE cl.customer_id = ?
+                    ORDER BY cl.created_at DESC
+                """, (cust[0],))
+
+                call_logs = cursor_notes.fetchall()
+                conn_notes.close()
+
+                if call_logs:
+                    st.write(f"**Toplam {len(call_logs)} arama kaydı:**")
+
+                    for log in call_logs:
+                        log_dict = dict(log)
+                        call_time = log_dict['created_at'][:16] if log_dict['created_at'] else '-'
+                        status = CALL_STATUS_LABELS.get(log_dict['call_status'], log_dict['call_status'])
+                        operator = log_dict['operator_name'] or 'Bilinmiyor'
+                        notes = log_dict['notes'] or '(Not yok)'
+
+                        with st.expander(f"🕐 {call_time} - {status} - {operator}"):
+                            st.text_area(
+                                "Notlar:",
+                                value=notes,
+                                height=100,
+                                disabled=True,
+                                key=f"note_{cust[0]}_{call_time}"
+                            )
+                else:
+                    st.info("Bu müşteri için henüz arama kaydı yok.")
+            else:
+                st.error(f"❌ Kullanıcı kodu '{user_code_notes}' bulunamadı!")
 
     # Operator assignment tool (available whether customers found or not)
     st.divider()

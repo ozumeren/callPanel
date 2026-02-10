@@ -135,6 +135,21 @@ def init_database():
         cursor.execute("ALTER TABLE customers ADD COLUMN site TEXT")
         conn.commit()
 
+    # Migration: Add total_deposit_amount column if it doesn't exist
+    cursor.execute("PRAGMA table_info(customers)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if 'total_deposit_amount' not in columns:
+        cursor.execute("ALTER TABLE customers ADD COLUMN total_deposit_amount REAL DEFAULT 0")
+        conn.commit()
+
+    # Migration: Add is_reserve column if it doesn't exist
+    # Reserve customers: total_deposit < 100,000 TRY AND passive 180+ days
+    cursor.execute("PRAGMA table_info(customers)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if 'is_reserve' not in columns:
+        cursor.execute("ALTER TABLE customers ADD COLUMN is_reserve INTEGER DEFAULT 0")
+        conn.commit()
+
     # Create indexes
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)")
@@ -143,6 +158,7 @@ def init_database():
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_customers_assigned_to ON customers(assigned_to)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_customers_last_operator ON customers(last_operator_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_customers_available_after ON customers(available_after)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_customers_is_reserve ON customers(is_reserve)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_call_logs_customer ON call_logs(customer_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_call_logs_operator ON call_logs(operator_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_call_logs_created ON call_logs(created_at)")

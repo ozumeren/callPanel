@@ -54,6 +54,10 @@ def process_csv_file(file, uploaded_by_id, site='truva'):
         # Calculate cutoff date (30 days ago)
         cutoff_date = datetime.now() - timedelta(days=30)
 
+        # Calculate reserve cutoff date (180 days ago)
+        # Reserve customers: total_deposit < 100,000 TRY AND inactive 180+ days
+        reserve_cutoff_date = datetime.now() - timedelta(days=180)
+
         for idx, row in df.iterrows():
             try:
                 # Extract data
@@ -63,8 +67,20 @@ def process_csv_file(file, uploaded_by_id, site='truva'):
                 phone = str(row['PHONE']).strip() if pd.notna(row['PHONE']) else ''
 
                 has_deposit = row.get('HAS_DEPOSIT', 0)
-                total_deposit = row.get('TOTAL_DEPOSIT_AMOUNT', 0)
+                total_deposit = float(row.get('TOTAL_DEPOSIT_AMOUNT', 0)) if pd.notna(row.get('TOTAL_DEPOSIT_AMOUNT')) else 0
                 last_deposit_date_str = row.get('LAST_DEPOSIT_TRANSACTION_DATE')
+
+                # Calculate if this customer should be in reserve pool
+                # Reserve criteria: total_deposit < 100,000 TRY AND inactive 180+ days
+                is_reserve = 0
+                if total_deposit < 100000:
+                    if pd.notna(last_deposit_date_str) and last_deposit_date_str:
+                        try:
+                            last_deposit_date = pd.to_datetime(last_deposit_date_str)
+                            if last_deposit_date < reserve_cutoff_date:
+                                is_reserve = 1  # Low value + very old = reserve
+                        except:
+                            pass
 
                 # Validation: Basic fields
                 if not all([first_name, surname, customer_code, phone]):
@@ -166,16 +182,19 @@ def process_csv_file(file, uploaded_by_id, site='truva'):
                             pass
 
                     # Update existing customer with new data
+                    # Also recalculate is_reserve in case their status changed
                     cursor.execute("""
                         UPDATE customers
                         SET name = ?,
                             surname = ?,
                             phone_number = ?,
                             last_deposit_date = ?,
+                            total_deposit_amount = ?,
+                            is_reserve = ?,
                             site = ?,
                             updated_at = ?
                         WHERE id = ?
-                    """, (first_name, surname, phone, last_deposit_date_str, site, datetime.now(), customer_id))
+                    """, (first_name, surname, phone, last_deposit_date_str, total_deposit, is_reserve, site, datetime.now(), customer_id))
 
                     skipped_duplicate += 1
                     continue  # Skip - already exists
@@ -183,9 +202,9 @@ def process_csv_file(file, uploaded_by_id, site='truva'):
                 # New customer - insert
                 cursor.execute("""
                     INSERT INTO customers
-                    (name, surname, user_code, phone_number, last_deposit_date, site, excel_upload_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (first_name, surname, customer_code, phone, last_deposit_date_str, site, upload_id))
+                    (name, surname, user_code, phone_number, last_deposit_date, total_deposit_amount, is_reserve, site, excel_upload_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (first_name, surname, customer_code, phone, last_deposit_date_str, total_deposit, is_reserve, site, upload_id))
 
                 successful += 1
 
