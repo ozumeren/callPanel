@@ -39,11 +39,14 @@ def init_database():
             call_attempts INTEGER DEFAULT 0,
             last_call_status TEXT,
             last_called_at TIMESTAMP,
+            last_operator_id INTEGER,
+            available_after TIMESTAMP,
             priority INTEGER DEFAULT 3,
             excel_upload_id INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (assigned_to) REFERENCES users(id),
+            FOREIGN KEY (last_operator_id) REFERENCES users(id),
             FOREIGN KEY (excel_upload_id) REFERENCES excel_uploads(id)
         )
     """)
@@ -79,12 +82,28 @@ def init_database():
         )
     """)
 
+    # Migration: Add last_operator_id column if it doesn't exist
+    cursor.execute("PRAGMA table_info(customers)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if 'last_operator_id' not in columns:
+        cursor.execute("ALTER TABLE customers ADD COLUMN last_operator_id INTEGER REFERENCES users(id)")
+        conn.commit()
+
+    # Migration: Add available_after column if it doesn't exist
+    cursor.execute("PRAGMA table_info(customers)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if 'available_after' not in columns:
+        cursor.execute("ALTER TABLE customers ADD COLUMN available_after TIMESTAMP")
+        conn.commit()
+
     # Create indexes
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_customers_pooling ON customers(status, priority DESC, created_at)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_customers_user_code ON customers(user_code)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_customers_assigned_to ON customers(assigned_to)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_customers_last_operator ON customers(last_operator_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_customers_available_after ON customers(available_after)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_call_logs_customer ON call_logs(customer_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_call_logs_operator ON call_logs(operator_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_call_logs_created ON call_logs(created_at)")
