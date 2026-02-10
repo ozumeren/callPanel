@@ -273,6 +273,7 @@ with tab3:
             c.call_attempts,
             c.last_call_status,
             c.created_at,
+            c.assigned_to,
             u.full_name as assigned_operator,
             c.available_after
         FROM customers c
@@ -331,6 +332,10 @@ with tab3:
             site_name = customer[5].title() if customer[5] else '-'
             site_emoji = "🎰" if customer[5] == 'truva' else "♠️" if customer[5] == 'venus' else ""
 
+            # Debug: Show assigned_to ID
+            assigned_id = customer[10]  # assigned_to (ID)
+            assigned_name = customer[11]  # assigned_operator (full_name)
+
             df_data.append({
                 'Ad': customer[1],
                 'Soyad': customer[2],
@@ -339,7 +344,7 @@ with tab3:
                 'Site': f"{site_emoji} {site_name}",
                 'Durum': CUSTOMER_STATUS_LABELS.get(customer[6], customer[6]),
                 'Deneme': f"{customer[7]}/3",
-                'Atanan Op.': customer[10] if customer[10] else '-',
+                'Atanan Op.': assigned_name if assigned_name else ('-' if not assigned_id else f"ID:{assigned_id}"),
                 'Oluşturma': customer[9][:10] if customer[9] else '-'
             })
 
