@@ -63,8 +63,16 @@ def process_csv_file(file, uploaded_by_id, site='truva'):
                 # Extract data
                 first_name = str(row['FIRST_NAME']).strip() if pd.notna(row['FIRST_NAME']) else ''
                 surname = str(row['SURNAME']).strip() if pd.notna(row['SURNAME']) else ''
-                customer_code = str(row['CUSTOMER_CODE']).strip() if pd.notna(row['CUSTOMER_CODE']) else ''
-                phone = str(row['PHONE']).strip() if pd.notna(row['PHONE']) else ''
+                raw_code = row['CUSTOMER_CODE']
+                if pd.notna(raw_code):
+                    customer_code = str(int(float(str(raw_code)))) if str(raw_code).replace('.','',1).isdigit() else str(raw_code).strip()
+                else:
+                    customer_code = ''
+                raw_phone = row['PHONE']
+                if pd.notna(raw_phone):
+                    phone = str(int(float(str(raw_phone)))) if str(raw_phone).replace('.','',1).isdigit() else str(raw_phone).strip()
+                else:
+                    phone = ''
 
                 has_deposit = row.get('HAS_DEPOSIT', 0)
                 total_deposit = float(row.get('TOTAL_DEPOSIT_AMOUNT', 0)) if pd.notna(row.get('TOTAL_DEPOSIT_AMOUNT')) else 0
