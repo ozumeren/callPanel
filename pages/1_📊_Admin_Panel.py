@@ -324,6 +324,10 @@ with tab3:
 
     st.divider()
 
+    # Reset page to 1 when filters change (track filter state)
+    if 'customer_list_page' not in st.session_state:
+        st.session_state.customer_list_page = 1
+
     # Filters - Row 1
     col1, col2, col3, col4 = st.columns(4)
 
@@ -559,8 +563,25 @@ with tab3:
     else:  # Az → Çok
         query += " ORDER BY c.call_attempts ASC, c.created_at DESC"
 
-    # Limit results
-    query += " LIMIT 500"
+    # Total count for pagination
+    count_query = f"SELECT COUNT(*) FROM ({query}) as q"
+    cursor.execute(count_query, params)
+    total_count = cursor.fetchone()[0]
+
+    # Pagination
+    PAGE_SIZE = 500
+    total_pages = max(1, (total_count + PAGE_SIZE - 1) // PAGE_SIZE)
+
+    if 'customer_list_page' not in st.session_state:
+        st.session_state.customer_list_page = 1
+
+    # Reset page if filters changed
+    page = st.session_state.customer_list_page
+    page = max(1, min(page, total_pages))
+    st.session_state.customer_list_page = page
+
+    offset = (page - 1) * PAGE_SIZE
+    query += f" LIMIT {PAGE_SIZE} OFFSET {offset}"
 
     cursor.execute(query, params)
     customers = cursor.fetchall()
@@ -568,7 +589,7 @@ with tab3:
 
     # Display results
     if customers:
-        st.write(f"**Toplam:** {len(customers)} müşteri (max 500 gösteriliyor)")
+        st.write(f"**Toplam:** {total_count} müşteri | Sayfa {page}/{total_pages} ({offset+1}–{min(offset+PAGE_SIZE, total_count)}. kayıt)")
 
         # Convert to DataFrame for better display
         df_data = []
@@ -624,6 +645,28 @@ with tab3:
                 )
             }
         )
+
+        # Pagination controls
+        if total_pages > 1:
+            pcol1, pcol2, pcol3, pcol4, pcol5 = st.columns([1, 1, 2, 1, 1])
+            with pcol1:
+                if st.button("⏮ İlk", disabled=(page == 1), key="page_first"):
+                    st.session_state.customer_list_page = 1
+                    st.rerun()
+            with pcol2:
+                if st.button("◀ Önceki", disabled=(page == 1), key="page_prev"):
+                    st.session_state.customer_list_page = page - 1
+                    st.rerun()
+            with pcol3:
+                st.markdown(f"<div style='text-align:center; padding-top:8px;'>Sayfa <b>{page}</b> / {total_pages}</div>", unsafe_allow_html=True)
+            with pcol4:
+                if st.button("Sonraki ▶", disabled=(page == total_pages), key="page_next"):
+                    st.session_state.customer_list_page = page + 1
+                    st.rerun()
+            with pcol5:
+                if st.button("Son ⏭", disabled=(page == total_pages), key="page_last"):
+                    st.session_state.customer_list_page = total_pages
+                    st.rerun()
 
         # Export option
         st.divider()
