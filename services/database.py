@@ -157,6 +157,19 @@ def init_database():
         cursor.execute("ALTER TABLE customers ADD COLUMN is_reserve INTEGER DEFAULT 0")
         conn.commit()
 
+    # Migration: Clean up phone numbers and user_codes ending with .0
+    cursor.execute("""
+        UPDATE customers
+        SET phone_number = SUBSTR(phone_number, 1, LENGTH(phone_number) - 2)
+        WHERE phone_number LIKE '%.0'
+    """)
+    cursor.execute("""
+        UPDATE customers
+        SET user_code = SUBSTR(user_code, 1, LENGTH(user_code) - 2)
+        WHERE user_code LIKE '%.0'
+    """)
+    conn.commit()
+
     # Create indexes
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)")
