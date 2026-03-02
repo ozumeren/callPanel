@@ -69,6 +69,9 @@ def process_csv_file(file, uploaded_by_id, site='truva'):
                 has_deposit = row.get('HAS_DEPOSIT', 0)
                 total_deposit = float(row.get('TOTAL_DEPOSIT_AMOUNT', 0)) if pd.notna(row.get('TOTAL_DEPOSIT_AMOUNT')) else 0
                 last_deposit_date_str = row.get('LAST_DEPOSIT_TRANSACTION_DATE')
+                last_login_date_str = row.get('LAST_LOGIN_DATE')
+                if pd.isna(last_login_date_str) if last_login_date_str is not None else False:
+                    last_login_date_str = None
 
                 # Calculate if this customer should be in reserve pool
                 # Reserve criteria: total_deposit < 100,000 TRY AND inactive 180+ days
@@ -189,12 +192,13 @@ def process_csv_file(file, uploaded_by_id, site='truva'):
                             surname = ?,
                             phone_number = ?,
                             last_deposit_date = ?,
+                            last_login_date = ?,
                             total_deposit_amount = ?,
                             is_reserve = ?,
                             site = ?,
                             updated_at = ?
                         WHERE id = ?
-                    """, (first_name, surname, phone, last_deposit_date_str, total_deposit, is_reserve, site, datetime.now(), customer_id))
+                    """, (first_name, surname, phone, last_deposit_date_str, last_login_date_str, total_deposit, is_reserve, site, datetime.now(), customer_id))
 
                     skipped_duplicate += 1
                     continue  # Skip - already exists
@@ -202,9 +206,9 @@ def process_csv_file(file, uploaded_by_id, site='truva'):
                 # New customer - insert
                 cursor.execute("""
                     INSERT INTO customers
-                    (name, surname, user_code, phone_number, last_deposit_date, total_deposit_amount, is_reserve, site, excel_upload_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (first_name, surname, customer_code, phone, last_deposit_date_str, total_deposit, is_reserve, site, upload_id))
+                    (name, surname, user_code, phone_number, last_deposit_date, last_login_date, total_deposit_amount, is_reserve, site, excel_upload_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (first_name, surname, customer_code, phone, last_deposit_date_str, last_login_date_str, total_deposit, is_reserve, site, upload_id))
 
                 successful += 1
 

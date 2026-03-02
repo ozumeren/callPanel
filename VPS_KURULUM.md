@@ -109,7 +109,7 @@ pip install -r requirements.txt
 
 ```bash
 # Veritabanını başlat
-streamlit run Home.py --server.port 8501 --server.address 0.0.0.0
+streamlit run Home.py --server.port 8502 --server.address 0.0.0.0
 
 # Tarayıcıda aç:
 # http://VPS_IP:8501

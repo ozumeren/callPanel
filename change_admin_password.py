@@ -11,8 +11,8 @@ from bcrypt import hashpw, gensalt
 DB_PATH = 'data/call_panel.db'
 
 # NEW credentials (change these)
-NEW_USERNAME = 'admin'  # Change this to your desired username
-NEW_PASSWORD = 'admin123'  # Change this to your desired password
+NEW_USERNAME = 'cerenkaya'  # Change this to your desired username
+NEW_PASSWORD = 'u4is2FDqmA7A'  # Change this to your desired password
 
 def change_admin_credentials():
     """Update admin username and password"""

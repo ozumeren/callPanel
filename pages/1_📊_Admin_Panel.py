@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 from services.csv_service import process_csv_file
 from services.auth_service import create_operator
 from services.database import get_connection
@@ -30,7 +30,7 @@ if st.sidebar.button("🚪 Çıkış Yap"):
 st.title("📊 Admin Paneli")
 
 # Tabs
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📈 Dashboard", "📤 CSV Yükle", "📋 Müşteri Listesi", "🎉 Geri Dönenler", "📵 Geçersiz Numaralar", "👥 Operatör Yönetimi"])
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["📈 Dashboard", "📤 CSV Yükle", "📋 Müşteri Listesi", "🎉 Geri Dönenler", "📵 Geçersiz Numaralar", "👥 Operatör Yönetimi", "🏊 Havuz Yönetimi"])
 
 # Tab 1: Dashboard
 with tab1:
@@ -324,7 +324,7 @@ with tab3:
 
     st.divider()
 
-    # Filters
+    # Filters - Row 1
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
@@ -350,6 +350,90 @@ with tab3:
             ["En Yeni", "En Eski", "Son Arama (Yeni → Eski)", "Son Arama (Eski → Yeni)", "Arama Denemesi (Çok → Az)", "Arama Denemesi (Az → Çok)"]
         )
 
+    # Filters - Row 2: Investment range & date filters
+    with st.expander("🔎 Gelişmiş Filtreler (Yatırım & Tarih)", expanded=False):
+        col5, col6, col7, col8 = st.columns(4)
+
+        with col5:
+            min_deposit = st.number_input(
+                "Min. Yatırım (TRY):",
+                min_value=0,
+                value=0,
+                step=1000,
+                help="0 = alt sınır yok"
+            )
+
+        with col6:
+            max_deposit = st.number_input(
+                "Max. Yatırım (TRY):",
+                min_value=0,
+                value=0,
+                step=1000,
+                help="0 = üst sınır yok"
+            )
+
+        with col7:
+            deposit_date_start = st.date_input(
+                "Son Yatırım Tarihi (Başlangıç):",
+                value=None,
+                key="dep_date_start",
+                help="Bu tarihten itibaren son yatırım yapanlar"
+            )
+
+        with col8:
+            deposit_date_end = st.date_input(
+                "Son Yatırım Tarihi (Bitiş):",
+                value=None,
+                key="dep_date_end",
+                help="Bu tarihe kadar son yatırım yapanlar"
+            )
+
+        col9, col10, col11, col12 = st.columns(4)
+
+        with col9:
+            login_date_start = st.date_input(
+                "Son Giriş Tarihi (Başlangıç):",
+                value=None,
+                key="login_date_start",
+                help="Bu tarihten itibaren platforma giriş yapanlar (LAST_LOGIN_DATE)"
+            )
+
+        with col10:
+            login_date_end = st.date_input(
+                "Son Giriş Tarihi (Bitiş):",
+                value=None,
+                key="login_date_end",
+                help="Bu tarihe kadar son giriş yapanlar (LAST_LOGIN_DATE)"
+            )
+
+        with col11:
+            last_call_start = st.date_input(
+                "Son Arama Tarihi (Başlangıç):",
+                value=None,
+                key="call_date_start",
+                help="Bu tarihten itibaren operatörce arananlar"
+            )
+
+        with col12:
+            last_call_end = st.date_input(
+                "Son Arama Tarihi (Bitiş):",
+                value=None,
+                key="call_date_end",
+                help="Bu tarihe kadar operatörce arananlar"
+            )
+
+        col13, col14 = st.columns(4)[:2]
+
+        with col13:
+            never_called = st.checkbox("Hiç Aranmayanlar", value=False, help="Sadece hiç arama yapılmamış müşterileri göster")
+
+        with col14:
+            site_filter = st.selectbox(
+                "Site:",
+                ["Tümü", "🎰 Truva", "♠️ Venus"],
+                key="site_filter_tab3"
+            )
+
     # Build query
     conn = get_connection()
     cursor = conn.cursor()
@@ -372,7 +456,10 @@ with tab3:
             c.available_after,
             c.last_called_at,
             cl.notes as last_notes,
-            c.is_reserve
+            c.is_reserve,
+            c.last_login_date,
+            c.last_deposit_date,
+            c.total_deposit_amount
         FROM customers c
         LEFT JOIN users u ON c.assigned_to = u.id
         LEFT JOIN call_logs cl ON cl.id = (
@@ -413,6 +500,51 @@ with tab3:
         search_pattern = f"%{search_query}%"
         params.extend([search_pattern, search_pattern, search_pattern, search_pattern])
 
+    # Investment amount filter
+    if min_deposit > 0:
+        query += " AND c.total_deposit_amount >= ?"
+        params.append(min_deposit)
+
+    if max_deposit > 0:
+        query += " AND c.total_deposit_amount <= ?"
+        params.append(max_deposit)
+
+    # Last deposit date filter
+    if deposit_date_start:
+        query += " AND c.last_deposit_date >= ?"
+        params.append(deposit_date_start.strftime('%Y-%m-%d'))
+
+    if deposit_date_end:
+        query += " AND c.last_deposit_date <= ?"
+        params.append((deposit_date_end + timedelta(days=1)).strftime('%Y-%m-%d'))
+
+    # Last login date filter (from CSV LAST_LOGIN_DATE)
+    if login_date_start:
+        query += " AND c.last_login_date >= ?"
+        params.append(login_date_start.strftime('%Y-%m-%d'))
+
+    if login_date_end:
+        query += " AND c.last_login_date <= ?"
+        params.append((login_date_end + timedelta(days=1)).strftime('%Y-%m-%d'))
+
+    # Last call date filter (operator calls)
+    if never_called:
+        query += " AND c.last_called_at IS NULL"
+    else:
+        if last_call_start:
+            query += " AND c.last_called_at >= ?"
+            params.append(last_call_start.strftime('%Y-%m-%d'))
+
+        if last_call_end:
+            query += " AND c.last_called_at < ?"
+            params.append((last_call_end + timedelta(days=1)).strftime('%Y-%m-%d'))
+
+    # Site filter
+    if site_filter == "🎰 Truva":
+        query += " AND c.site = 'truva'"
+    elif site_filter == "♠️ Venus":
+        query += " AND c.site = 'venus'"
+
     # Sorting
     if sort_by == "En Yeni":
         query += " ORDER BY c.created_at DESC"
@@ -444,12 +576,14 @@ with tab3:
             site_name = customer[5].title() if customer[5] else '-'
             site_emoji = "🎰" if customer[5] == 'truva' else "♠️" if customer[5] == 'venus' else ""
 
-            # Debug: Show assigned_to ID
             assigned_id = customer[10]  # assigned_to (ID)
             assigned_name = customer[11]  # assigned_operator (full_name)
             last_called = customer[13]  # last_called_at
             last_notes = customer[14]  # last_notes
             is_reserve = customer[15]  # is_reserve
+            last_login_date = customer[16]  # last_login_date
+            last_deposit_date = customer[17]  # last_deposit_date
+            total_deposit = customer[18]  # total_deposit_amount
 
             # Truncate notes for display (first 40 chars)
             notes_display = '-'
@@ -459,6 +593,9 @@ with tab3:
             # Pool tier display
             pool_tier = "🔄 Rezerv" if is_reserve == 1 else "💎 Birincil"
 
+            # Format deposit amount
+            deposit_str = f"{total_deposit:,.0f} ₺" if total_deposit else '-'
+
             df_data.append({
                 'Ad': customer[1],
                 'Soyad': customer[2],
@@ -467,6 +604,9 @@ with tab3:
                 'Site': f"{site_emoji} {site_name}",
                 'Havuz': pool_tier,
                 'Durum': CUSTOMER_STATUS_LABELS.get(customer[6], customer[6]),
+                'Yatırım': deposit_str,
+                'Son Yatırım': last_deposit_date[:10] if last_deposit_date else '-',
+                'Son Giriş': last_login_date[:10] if last_login_date else '-',
                 'Deneme': f"{customer[7]}/3",
                 'Son Arama': last_called[:16] if last_called else '-',
                 'Son Not': notes_display,
@@ -1022,3 +1162,243 @@ with tab6:
                         st.rerun()
     else:
         st.info("Henüz operatör yok")
+
+# Tab 7: Pool Management
+with tab7:
+    st.subheader("🏊 Havuz Yönetimi")
+    st.info("Bu sekme üzerinden havuzdaki müşterileri operatörlere atabilir veya operatöre atanmış müşterileri havuza geri alabilirsiniz.")
+
+    pool_subtab1, pool_subtab2 = st.tabs(["➕ Havuzdan Personele Ekle", "➖ Personelden Havuza Al"])
+
+    # ── Sub-tab 1: Pool → Operator ──────────────────────────────────────────
+    with pool_subtab1:
+        st.write("Havuzdaki (bekleyen) bir müşteriyi seçip doğrudan bir operatöre atayın.")
+
+        # Get active operators
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, full_name FROM users
+            WHERE role = 'operator' AND is_active = 1
+            ORDER BY full_name
+        """)
+        ops_pool = cursor.fetchall()
+        conn.close()
+
+        if not ops_pool:
+            st.warning("⚠️ Aktif operatör bulunamadı. Önce operatör ekleyin.")
+        else:
+            ops_pool_dict = {op['full_name']: op['id'] for op in ops_pool}
+
+            # Controls
+            ctrl1, ctrl2, ctrl3, ctrl4 = st.columns([2, 2, 2, 1])
+            with ctrl1:
+                selected_op_for_pool = st.selectbox(
+                    "Atanacak Operatör:",
+                    list(ops_pool_dict.keys()),
+                    key="pool_to_op_select"
+                )
+            with ctrl2:
+                pool_type_f = st.selectbox(
+                    "Havuz Tipi:",
+                    ["Tümü", "💎 Birincil", "🔄 Rezerv"],
+                    key="pool_type_f"
+                )
+            with ctrl3:
+                pool_search_f = st.text_input("🔍 Ara (Ad, Soyad, Kod):", "", key="pool_search_f")
+            with ctrl4:
+                st.write("")
+                if st.button("🔄 Yenile", key="refresh_pool_list"):
+                    st.rerun()
+
+            # Build pool query
+            conn = get_connection()
+            cursor = conn.cursor()
+
+            pq = """
+                SELECT c.id, c.name, c.surname, c.user_code, c.phone_number,
+                       c.site, c.total_deposit_amount, c.last_deposit_date,
+                       c.is_reserve, c.call_attempts, c.last_called_at
+                FROM customers c
+                WHERE c.status = 'pending'
+                  AND (c.available_after IS NULL OR c.available_after <= datetime('now'))
+            """
+            pp = []
+
+            if pool_type_f == "💎 Birincil":
+                pq += " AND c.is_reserve = 0"
+            elif pool_type_f == "🔄 Rezerv":
+                pq += " AND c.is_reserve = 1"
+
+            if pool_search_f:
+                pq += " AND (c.name LIKE ? OR c.surname LIKE ? OR c.user_code LIKE ?)"
+                sp = f"%{pool_search_f}%"
+                pp.extend([sp, sp, sp])
+
+            pq += " ORDER BY c.is_reserve ASC, c.priority DESC, c.created_at ASC LIMIT 100"
+
+            cursor.execute(pq, pp)
+            pool_custs = cursor.fetchall()
+            conn.close()
+
+            st.write(f"**Havuzda {len(pool_custs)} müşteri** (max 100 gösteriliyor)")
+
+            if pool_custs:
+                # Header row
+                hc1, hc2, hc3, hc4, hc5, hc6 = st.columns([2, 1, 1, 1, 1, 1])
+                hc1.markdown("**Ad Soyad / Kod**")
+                hc2.markdown("**Havuz**")
+                hc3.markdown("**Yatırım**")
+                hc4.markdown("**Son Yatırım**")
+                hc5.markdown("**Deneme**")
+                hc6.markdown("**İşlem**")
+                st.divider()
+
+                for cust in pool_custs:
+                    cust_dict = dict(cust)
+                    pool_tier = "🔄 Rezerv" if cust_dict['is_reserve'] else "💎 Birincil"
+                    site_emoji = "🎰" if cust_dict.get('site') == 'truva' else "♠️" if cust_dict.get('site') == 'venus' else ""
+                    deposit_str = f"{cust_dict['total_deposit_amount']:,.0f} ₺" if cust_dict.get('total_deposit_amount') else "-"
+                    dep_date = cust_dict['last_deposit_date'][:10] if cust_dict.get('last_deposit_date') else "-"
+
+                    rc1, rc2, rc3, rc4, rc5, rc6 = st.columns([2, 1, 1, 1, 1, 1])
+                    with rc1:
+                        st.write(f"**{cust_dict['name']} {cust_dict['surname']}**")
+                        st.caption(f"{cust_dict['user_code']} {site_emoji} | {cust_dict['phone_number']}")
+                    with rc2:
+                        st.write(pool_tier)
+                    with rc3:
+                        st.write(deposit_str)
+                    with rc4:
+                        st.write(dep_date)
+                    with rc5:
+                        st.write(f"{cust_dict['call_attempts']}/3")
+                    with rc6:
+                        if st.button("➕ Ata", key=f"assign_pool_{cust_dict['id']}", type="primary"):
+                            op_id = ops_pool_dict[selected_op_for_pool]
+                            conn_a = get_connection()
+                            cursor_a = conn_a.cursor()
+                            cursor_a.execute("""
+                                UPDATE customers
+                                SET assigned_to = ?,
+                                    status = 'assigned',
+                                    assigned_at = ?,
+                                    updated_at = ?
+                                WHERE id = ?
+                            """, (op_id, datetime.now(), datetime.now(), cust_dict['id']))
+                            conn_a.commit()
+                            conn_a.close()
+                            st.success(f"✅ {cust_dict['name']} {cust_dict['surname']} → {selected_op_for_pool}")
+                            st.rerun()
+
+                    st.divider()
+            else:
+                st.info("Havuzda uygun müşteri bulunamadı.")
+
+    # ── Sub-tab 2: Operator → Pool ──────────────────────────────────────────
+    with pool_subtab2:
+        st.write("Bir operatöre atanmış müşterileri havuza geri alın.")
+
+        # Get active operators for filter
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT DISTINCT u.id, u.full_name
+            FROM users u
+            JOIN customers c ON c.assigned_to = u.id
+            WHERE c.status = 'assigned' AND u.is_active = 1
+            ORDER BY u.full_name
+        """)
+        ops_assigned = cursor.fetchall()
+        conn.close()
+
+        op_filter_opts = ["Tüm Operatörler"] + [op['full_name'] for op in ops_assigned]
+
+        ac1, ac2 = st.columns([2, 1])
+        with ac1:
+            selected_op_filter2 = st.selectbox(
+                "Operatöre Göre Filtrele:",
+                op_filter_opts,
+                key="assigned_op_filter2"
+            )
+        with ac2:
+            st.write("")
+            if st.button("🔄 Yenile", key="refresh_assigned_list"):
+                st.rerun()
+
+        # Build assigned customers query
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        aq = """
+            SELECT c.id, c.name, c.surname, c.user_code, c.phone_number,
+                   c.site, c.total_deposit_amount, c.last_deposit_date,
+                   c.assigned_at, u.full_name as operator_name, u.id as operator_id
+            FROM customers c
+            LEFT JOIN users u ON c.assigned_to = u.id
+            WHERE c.status = 'assigned'
+        """
+        ap = []
+
+        if selected_op_filter2 != "Tüm Operatörler":
+            aq += " AND u.full_name = ?"
+            ap.append(selected_op_filter2)
+
+        aq += " ORDER BY u.full_name ASC, c.assigned_at DESC LIMIT 200"
+
+        cursor.execute(aq, ap)
+        assigned_custs = cursor.fetchall()
+        conn.close()
+
+        st.write(f"**{len(assigned_custs)} müşteri operatöre atanmış**")
+
+        if assigned_custs:
+            # Header row
+            ah1, ah2, ah3, ah4, ah5, ah6 = st.columns([2, 1, 1, 1, 1, 1])
+            ah1.markdown("**Ad Soyad / Kod**")
+            ah2.markdown("**Operatör**")
+            ah3.markdown("**Yatırım**")
+            ah4.markdown("**Son Yatırım**")
+            ah5.markdown("**Atanma**")
+            ah6.markdown("**İşlem**")
+            st.divider()
+
+            for cust in assigned_custs:
+                cust_dict = dict(cust)
+                site_emoji = "🎰" if cust_dict.get('site') == 'truva' else "♠️" if cust_dict.get('site') == 'venus' else ""
+                deposit_str = f"{cust_dict['total_deposit_amount']:,.0f} ₺" if cust_dict.get('total_deposit_amount') else "-"
+                dep_date = cust_dict['last_deposit_date'][:10] if cust_dict.get('last_deposit_date') else "-"
+                assigned_at_str = cust_dict['assigned_at'][:16] if cust_dict.get('assigned_at') else "-"
+
+                ar1, ar2, ar3, ar4, ar5, ar6 = st.columns([2, 1, 1, 1, 1, 1])
+                with ar1:
+                    st.write(f"**{cust_dict['name']} {cust_dict['surname']}**")
+                    st.caption(f"{cust_dict['user_code']} {site_emoji} | {cust_dict['phone_number']}")
+                with ar2:
+                    st.write(cust_dict.get('operator_name') or '-')
+                with ar3:
+                    st.write(deposit_str)
+                with ar4:
+                    st.write(dep_date)
+                with ar5:
+                    st.write(assigned_at_str)
+                with ar6:
+                    if st.button("➖ Havuza Al", key=f"release_pool_{cust_dict['id']}"):
+                        conn_r = get_connection()
+                        cursor_r = conn_r.cursor()
+                        cursor_r.execute("""
+                            UPDATE customers
+                            SET assigned_to = NULL,
+                                status = 'pending',
+                                assigned_at = NULL,
+                                updated_at = ?
+                            WHERE id = ?
+                        """, (datetime.now(), cust_dict['id']))
+                        conn_r.commit()
+                        conn_r.close()
+                        st.success(f"✅ {cust_dict['name']} {cust_dict['surname']} havuza geri alındı.")
+                        st.rerun()
+
+                st.divider()
+        else:
+            st.info("Operatöre atanmış müşteri bulunamadı.")

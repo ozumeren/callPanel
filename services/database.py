@@ -128,6 +128,13 @@ def init_database():
         cursor.execute("ALTER TABLE customers ADD COLUMN last_deposit_date TEXT")
         conn.commit()
 
+    # Migration: Add last_login_date column if it doesn't exist
+    cursor.execute("PRAGMA table_info(customers)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if 'last_login_date' not in columns:
+        cursor.execute("ALTER TABLE customers ADD COLUMN last_login_date TEXT")
+        conn.commit()
+
     # Migration: Add site column if it doesn't exist (truva or venus)
     cursor.execute("PRAGMA table_info(customers)")
     columns = [row[1] for row in cursor.fetchall()]
