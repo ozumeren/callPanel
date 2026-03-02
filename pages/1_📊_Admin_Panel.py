@@ -593,9 +593,6 @@ with tab3:
             # Pool tier display
             pool_tier = "🔄 Rezerv" if is_reserve == 1 else "💎 Birincil"
 
-            # Format deposit amount
-            deposit_str = f"{total_deposit:,.0f} ₺" if total_deposit else '-'
-
             df_data.append({
                 'Ad': customer[1],
                 'Soyad': customer[2],
@@ -604,7 +601,7 @@ with tab3:
                 'Site': f"{site_emoji} {site_name}",
                 'Havuz': pool_tier,
                 'Durum': CUSTOMER_STATUS_LABELS.get(customer[6], customer[6]),
-                'Yatırım': deposit_str,
+                'Yatırım (₺)': float(total_deposit) if total_deposit else 0.0,
                 'Son Yatırım': last_deposit_date[:10] if last_deposit_date else '-',
                 'Son Giriş': last_login_date[:10] if last_login_date else '-',
                 'Deneme': f"{customer[7]}/3",
@@ -619,7 +616,13 @@ with tab3:
             df,
             width="stretch",
             hide_index=True,
-            height=400
+            height=400,
+            column_config={
+                "Yatırım (₺)": st.column_config.NumberColumn(
+                    "Yatırım (₺)",
+                    format="%.0f ₺"
+                )
+            }
         )
 
         # Export option
